@@ -1,0 +1,60 @@
+name: Deploy on image published
+
+# Déclenché par ArkCloud (arkcloud-backend-ci.yml / arkcloud-frontend-ci.yml) juste après un
+# push d'image réussi vers GHCR — voir ArkCloud/.github/workflows/*.yml, étape "Notify
+# ArkCloudInfra of new image". Payload attendu :
+#   { "app": "api" | "web", "tag": "<image tag>", "environment": "dev" | "staging" | "prod" }
+
+on:
+  repository_dispatch:
+    types: [image-published]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
+  TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
+  TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+
+jobs:
+  deploy:
+    name: terraform apply (${{ github.event.client_payload.app }} → ${{ github.event.client_payload.environment }})
+    runs-on: ubuntu-latest
+    # Même gate manuel que l'apply normal (terraform-ci.yml) — un déploiement automatique
+    # d'image reste soumis à approbation, ce n'est pas parce que la source diffère (event vs
+    # push) que le contrôle doit sauter.
+    environment: production
+    defaults:
+      run:
+        working-directory: environments/${{ github.event.client_payload.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init
+
+      # -target scope l'apply à UN SEUL app-service — sans ça, un déploiement de l'API à lui
+      # seul repasserait web_image_tag à sa valeur par défaut (aucune valeur n'est fournie
+      # pour cette variable dans ce run), ce qui redéploierait Blazor avec "latest" sans
+      # raison. -target évite complètement ce problème : Terraform ne touche à rien d'autre
+      # que la ressource ciblée, quelle que soit la valeur résolue des autres variables.
+      - name: terraform apply (image tag only)
+        run: |
+          if [ "${{ github.event.client_payload.app }}" = "api" ]; then
+            terraform apply -auto-approve -input=false \
+              -target=module.app_service_api.azurerm_linux_web_app.this \
+              -var "api_image_tag=${{ github.event.client_payload.tag }}"
+          else
+            terraform apply -auto-approve -input=false \
+              -target=module.app_service_web.azurerm_linux_web_app.this \
+              -var "web_image_tag=${{ github.event.client_payload.tag }}"
+          fi

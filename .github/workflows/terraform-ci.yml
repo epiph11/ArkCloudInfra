@@ -1,0 +1,112 @@
+name: Terraform CI
+
+# Authentification Azure par OIDC (pas de secret client stocké) — nécessite un one-shot de
+# configuration manuelle côté Azure. Voir README.md §6 pour les commandes exactes.
+
+on:
+  pull_request:
+    paths:
+      - "modules/**"
+      - "environments/**"
+  push:
+    branches: [main]
+    paths:
+      - "modules/**"
+      - "environments/**"
+
+permissions:
+  id-token: write   # nécessaire pour qu'Azure AD délivre un jeton OIDC à ce run
+  contents: read
+  pull-requests: write
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
+  TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
+  TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+
+jobs:
+  validate:
+    name: Lint, scan & plan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev]  # staging/prod ajoutés une fois dev validé en continu
+    defaults:
+      run:
+        working-directory: environments/${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive
+
+      - name: Setup tflint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.55.1
+
+      - name: tflint
+        run: |
+          tflint --init --config="${{ github.workspace }}/.tflint.hcl"
+          tflint --config="${{ github.workspace }}/.tflint.hcl" --recursive
+
+      # Scanne le code Terraform lui-même (pas l'infra déployée) : Storage Account public,
+      # PostgreSQL sans SSL forcé, Key Vault sans purge protection, NSG trop permissif, etc.
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: environments/${{ matrix.environment }}
+          framework: terraform
+          quiet: true
+          soft_fail: false
+
+      - name: terraform init
+        run: terraform init
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan
+        run: terraform plan -out=tfplan -input=false
+
+      # Visible directement dans l'onglet "Summary" du run, sans action tierce ni permission
+      # supplémentaire — suffisant pour relire un plan avant merge.
+      - name: Publier le plan dans le résumé du run
+        if: always()
+        run: |
+          echo '## Terraform plan — ${{ matrix.environment }}' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          terraform show -no-color tfplan >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # Ne tourne que sur push vers main (jamais sur une PR), après validate. Gated par
+  # l'Environment GitHub "production" — ajouter des reviewers requis dans Settings >
+  # Environments donne l'approbation manuelle avant tout apply réel, sans toucher au workflow.
+  apply:
+    name: Apply
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: environments/dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init
+
+      - name: terraform apply
+        run: terraform apply -auto-approve -input=false
