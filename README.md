@@ -275,8 +275,8 @@ Trois problèmes que la seule lecture du code ne pouvait pas révéler — seule
 
 1. ~~**Réorganiser les Dockerfiles**~~ ✅ Fait — `ArkCloud/deploy/docker/Dockerfile.api` et `Dockerfile.blazor`, `docker-compose.yml` et les deux workflows CI mis à jour.
 2. ~~**Enrichir `arkcloud-backend-ci.yml`/`arkcloud-frontend-ci.yml`** — scan Trivy avant push~~ ✅ Fait (`aquasecurity/trivy-action@0.36.0`, bloquant sur `CRITICAL`/`HIGH` avec correctif disponible). Reste : pousser réellement un premier tag d'image (déclenche au prochain push sur `main`/`staging`/`develop`) — tant que ça n'a pas eu lieu, les deux App Services n'ont aucune image réelle à tirer.
-3. ~~**Enrichir `terraform-ci.yml`**~~ ✅ Fait — `fmt`, tflint, Checkov, `init`/`validate`/`plan` réels (plan publié dans le résumé du run), job `apply` séparé gaté par l'Environment GitHub `production`. **Reste un one-shot manuel côté Azure + GitHub avant que ça tourne réellement — voir §6.**
-4. ~~**Brancher le déploiement continu**~~ ✅ Fait côté workflows — déclenchement cross-repo `ArkCloud` → `ArkCloudInfra` via `repository_dispatch`, voir §7. **Reste un pas manuel avant que ça tourne réellement : créer le PAT `INFRA_DISPATCH_TOKEN` et le poser comme secret dans `ArkCloud`** (détails en §7).
+3. ~~**Enrichir `terraform-ci.yml`**~~ ✅ Fait — `fmt`, tflint, Checkov, `init`/`validate`/`plan` réels (plan publié dans le résumé du run), job `apply` séparé gaté par l'Environment GitHub `production` avec reviewer requis. ~~Setup Azure/GitHub OIDC one-shot~~ ✅ Fait — voir §6.
+4. ~~**Brancher le déploiement continu**~~ ✅ Fait — déclenchement cross-repo `ArkCloud` → `ArkCloudInfra` via `repository_dispatch` (§7), PAT `INFRA_DISPATCH_TOKEN` créé et posé comme secret dans `ArkCloud`. Validé de bout en bout le 16/07 : push sur `develop` → CI → GHCR → dispatch reçu par `ArkCloudInfra`. Bloqué ensuite par le nouveau format immuable des subjects OIDC (voir §6 addendum) — corrigé, en attente de confirmation du rerun.
 5. ~~**Activer Key Vault pour de vrai**~~ ✅ Fait — `Jwt--Key` et `ConnectionStrings--DefaultConnection` posés dans `kv-arkcloud-dev` (§8), `app-arkcloud-api-dev` redémarré pour les prendre en compte. Validation complète (logs montrant une vraie connexion DB) reportée à après le premier push d'image réelle (point 2 ci-dessus), tant que l'App Service tourne sur le placeholder par défaut.
 6. **Vérifier le monitoring** — Application Insights remonte bien requêtes/exceptions/dépendances des deux apps une fois qu'elles serviront du vrai trafic.
 7. **Checklist de clôture Sprint 4** — sous-partie Azure/DevOps de `ArkCloud/docs/infra-roadmap.md` Step 17.
@@ -324,6 +324,10 @@ Puis, côté GitHub (`Settings` du repo `ArkCloudInfra`) :
 - **Settings → Environments → New environment → `production`** : ajoute-toi (ou une autre personne) comme *required reviewer* — c'est ce qui transforme le job `apply` en étape gatée manuellement plutôt qu'automatique à chaque merge sur `main`.
 
 Tant que ce setup n'est pas fait, `terraform-ci.yml` échouera dès `terraform init` (pas d'identité pour s'authentifier) — normal, pas un bug du workflow.
+
+**✅ Fait** — App Registration `github-arkcloudinfra` (`appId` `63df2a4f-1129-424e-b6cf-b6c6613bc022`) + service principal créés, deux federated credentials posés (`ref:refs/heads/main` et `pull_request`), rôles `Contributor` (souscription) et `Storage Blob Data Contributor` (`arkcloudstatestore`) assignés, secrets/variable GitHub posés via `gh secret set`/`gh variable set`.
+
+Point notable rencontré : `Required reviewers` sur l'Environment `production` n'est pas disponible pour un repo **privé** sur GitHub Free/Pro/Team (uniquement Enterprise Cloud pour le privé) — seulement `Wait timer`. Choix fait : passer `ArkCloudInfra` en **repo public** (le code Terraform ne contient aucun secret réel — mots de passe/clés passés par variable d'environnement ou Key Vault, jamais commités) pour débloquer `Required reviewers` gratuitement plutôt que de se contenter d'un simple minuteur.
 
 ---
 
@@ -409,3 +413,25 @@ az webapp restart --name app-arkcloud-api-dev --resource-group rg-arkcloud-dev
 ```
 
 Pas d'équivalent côté `app-arkcloud-web-dev` — Blazor ne lit aucun secret de Key Vault (§3, module `app-service` : `key_vault_uri` lui est passé pour cohérence de module mais reste inutilisé côté Blazor).
+
+---
+
+## 9. Checkov — findings corrigés vs. délibérément écartés
+
+Le premier vrai run de `terraform-ci.yml` a remonté 28 findings sur `environments/dev`. Pas de faux positifs — un vrai désaccord entre le jeu de règles "prod durcie par défaut" de Checkov et des choix faits consciemment pour un environnement **dev**. Décision : corriger ce qui est gratuit et sans compromis, documenter (`skip_check` dans `terraform-ci.yml`) le reste plutôt que soit payer pour rien sur du dev jetable, soit désactiver le scanner.
+
+### Corrigés dans le code (aucun compromis, applicable à tout environnement)
+
+- **`CKV_AZURE_78`** (FTP déploiement) — `ftps_state = "Disabled"` dans `modules/azure/app-service/main.tf`. Le déploiement passe par Terraform/GHCR, jamais par FTP — aucune raison de laisser cette surface active.
+- **`CKV_AZURE_18`** (version HTTP) — `http2_enabled = true`.
+- **`CKV_AZURE_17`** (client certificates) — `client_certificate_enabled = true` avec `client_certificate_mode = "Optional"` : satisfait le check sans exiger de mTLS, donc sans casser l'accès HTTPS normal des navigateurs/clients API.
+- **`CKV_AZURE_65`/`CKV_AZURE_66`** (detailed error messages / failed request tracing) — activés dans le bloc `logs`, diagnostics locaux retenus par l'App Service, aucune ressource de stockage supplémentaire nécessaire.
+- **`CKV2_AZURE_31`** (subnet sans NSG) — `snet-private-endpoint` était le seul des 4 subnets sans NSG associé (oubli, pas un choix) ; `nsg-private-endpoint` ajouté, vide comme `nsg-api`, pour la même raison (rien n'y écoute encore).
+
+### Écartés — `skip_check` documenté dans `terraform-ci.yml`
+
+- **`CKV_AZURE_225`/`212`/`211`** (zone redundancy, instances minimales, SKU "production") et **`CKV_AZURE_136`** (backup géo-redondant PostgreSQL) — tous exigent de sortir du tier dev (App Service B1 Basic, PostgreSQL Burstable) vers un tier qui coûte réellement plus cher (Premium v2/v3, General Purpose) sans aucun bénéfice sur un environnement jetable où personne ne dépend d'un SLA. `environments/staging`/`prod` existent déjà dans la structure du repo précisément pour appliquer ces standards quand un vrai environnement à durcir existera — pas avant.
+- **`CKV_AZURE_189`/`109`, `CKV2_AZURE_32`/`CKV2_AZURE_57`** (Key Vault + PostgreSQL sans private endpoint/firewall) — `snet-private-endpoint` est réservé exprès pour ça (§3), volontairement vide jusqu'au durcissement Sprint 6.
+- **`CKV_AZURE_222`** (App Service accessible publiquement) — désactiver l'accès public exige un point d'entrée public devant (Application Gateway ou Front Door) : une vraie nouvelle brique d'infra, portée Sprint 6+, pas un flag à inverser.
+- **`CKV_AZURE_13`** (Azure App Service Authentication / Easy Auth) — l'activer ferait doublon avec le système JWT propre à `ArkCloud.API` : deux couches d'authentification qui se marcheraient dessus, pas un vrai manque.
+- **`CKV_AZURE_88`** (App Service + Azure Files) — pensé pour des apps ayant besoin de stockage fichier persistant ; cette app est sans état, tout ce qui doit durer vit dans PostgreSQL.

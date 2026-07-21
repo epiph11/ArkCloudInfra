@@ -140,3 +140,19 @@ resource "azurerm_subnet_network_security_group_association" "database" {
   subnet_id                 = azurerm_subnet.database.id
   network_security_group_id = azurerm_network_security_group.database.id
 }
+
+# --- NSG: private-endpoint subnet. Empty like nsg-api — nothing initiates outbound from here
+# and Azure's default rules already deny inbound from the Internet. Exists mainly so Checkov
+# (CKV2_AZURE_31: every subnet needs an NSG) doesn't flag this one as the odd one out, and so
+# Sprint 6 has a concrete place to add rules once real private endpoints land here. ---
+resource "azurerm_network_security_group" "private_endpoint" {
+  name                = "nsg-private-endpoint"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  tags                = var.tags
+}
+
+resource "azurerm_subnet_network_security_group_association" "private_endpoint" {
+  subnet_id                 = azurerm_subnet.private_endpoint.id
+  network_security_group_id = azurerm_network_security_group.private_endpoint.id
+}

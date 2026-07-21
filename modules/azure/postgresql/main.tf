@@ -25,8 +25,8 @@ resource "azurerm_postgresql_flexible_server" "this" {
   administrator_login    = var.administrator_login
   administrator_password = var.administrator_password
 
-  delegated_subnet_id    = var.delegated_subnet_id
-  private_dns_zone_id    = azurerm_private_dns_zone.postgres.id
+  delegated_subnet_id = var.delegated_subnet_id
+  private_dns_zone_id = azurerm_private_dns_zone.postgres.id
 
   # Azure refuses public network access and VNet-integrated private access at the same time —
   # the provider defaults this to true, which conflicts with delegated_subnet_id above.
