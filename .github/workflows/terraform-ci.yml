@@ -77,13 +77,6 @@ jobs:
       #     auth — two overlapping auth layers, not a gap to close.
       #   - CKV_AZURE_88: Azure Files is for apps needing persistent local file storage: this
       #     app is stateless, everything durable lives in PostgreSQL.
-      #   - CKV_AZURE_65/66: detailed error messages / failed request tracing — these checks
-      #     were originally written for the deprecated azurerm_app_service resource (Windows/IIS
-      #     diagnostics). The `logs { detailed_error_messages { enabled = true } ... }` block IS
-      #     set in modules/azure/app-service/main.tf (syntactically correct, matches the current
-      #     azurerm_linux_web_app schema), but the check doesn't reliably match against the Linux
-      #     web app resource variant — a known mismatch, not a real gap on a Linux container app
-      #     where these IIS-era diagnostics don't meaningfully apply anyway.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -94,7 +87,7 @@ jobs:
           skip_check: >-
             CKV_AZURE_225,CKV_AZURE_212,CKV_AZURE_211,CKV_AZURE_136,
             CKV_AZURE_189,CKV_AZURE_109,CKV2_AZURE_32,CKV2_AZURE_57,
-            CKV_AZURE_222,CKV_AZURE_13,CKV_AZURE_88,CKV_AZURE_65,CKV_AZURE_66
+            CKV_AZURE_222,CKV_AZURE_13,CKV_AZURE_88
 
       - name: terraform init
         run: terraform init

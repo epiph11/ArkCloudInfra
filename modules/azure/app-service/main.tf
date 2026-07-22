@@ -72,13 +72,11 @@ resource "azurerm_linux_web_app" "this" {
     }
     # Local, App Service-retained diagnostics — no separate storage account needed. Detailed
     # error pages and failed-request traces are invaluable when something 500s and App Insights
-    # alone doesn't explain why.
-    detailed_error_messages {
-      enabled = true
-    }
-    failed_request_tracing {
-      enabled = true
-    }
+    # alone doesn't explain why. Plain boolean attributes on azurerm_linux_web_app's current
+    # schema — NOT sub-blocks (first attempt used `detailed_error_messages { enabled = true }`,
+    # which terraform validate rejects: "Unsupported block type").
+    detailed_error_messages = true
+    failed_request_tracing  = true
   }
 
   tags = var.tags
