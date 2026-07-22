@@ -8,11 +8,13 @@ on:
     paths:
       - "modules/**"
       - "environments/**"
+      - ".github/workflows/terraform-ci.yml"
   push:
     branches: [main]
     paths:
       - "modules/**"
       - "environments/**"
+      - ".github/workflows/terraform-ci.yml"
 
 permissions:
   id-token: write   # nécessaire pour qu'Azure AD délivre un jeton OIDC à ce run
