@@ -43,7 +43,13 @@ resource "azurerm_postgresql_flexible_server" "this" {
   lifecycle {
     # Password rotation should go through a separate, deliberate change — not an incidental
     # side effect of an unrelated `terraform apply` picking up a stale var value.
-    ignore_changes = [administrator_password]
+    #
+    # zone: never set explicitly above, so Azure picks one at creation time (whatever's free
+    # in the region). Every subsequent apply then sees "no zone configured" as a diff and
+    # tries to change it — but the API rejects a bare zone change outside of an HA failover
+    # ("zone can only be changed when exchanged with high_availability.0.standby_availability_zone").
+    # We don't need a specific zone for dev, so just stop tracking it.
+    ignore_changes = [administrator_password, zone]
   }
 }
 
