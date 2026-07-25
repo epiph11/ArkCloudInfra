@@ -28,6 +28,7 @@ env:
   ARM_USE_OIDC: true
   TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
   TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+  TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
 
 jobs:
   validate:

@@ -78,6 +78,10 @@ module "app_service_api" {
   container_image_name = "${var.image_org}/arkcloud-api"
   container_image_tag  = var.api_image_tag
 
+  container_registry_url      = "https://ghcr.io"
+  container_registry_username = var.ghcr_username
+  container_registry_password = var.ghcr_pat
+
   key_vault_uri                  = module.key_vault.vault_uri
   app_insights_connection_string = module.monitoring.connection_string
 
@@ -109,6 +113,10 @@ module "app_service_web" {
 
   container_image_name = "${var.image_org}/arkcloud-frontend"
   container_image_tag  = var.web_image_tag
+
+  container_registry_url      = "https://ghcr.io"
+  container_registry_username = var.ghcr_username
+  container_registry_password = var.ghcr_pat
 
   # Blazor doesn't read secrets from Key Vault today, but the module requires the variable —
   # harmless: the app setting just goes unused. Kept for consistency rather than making the

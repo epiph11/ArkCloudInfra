@@ -60,3 +60,15 @@ variable "web_image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "ghcr_username" {
+  description = "GitHub username/org owning the GHCR packages — used only as the Docker registry login, distinct from image_org in case they ever diverge."
+  type        = string
+  default     = "epiph11"
+}
+
+variable "ghcr_pat" {
+  description = "GitHub PAT scoped to read:packages only, used solely so App Service can authenticate to ghcr.io — packages here are not guaranteed to stay public, and a real credential is more durable than depending on a visibility toggle. Never put a literal value here or in terraform.tfvars — supply via TF_VAR_ghcr_pat (local) or a CI secret (pipeline)."
+  type        = string
+  sensitive   = true
+}
