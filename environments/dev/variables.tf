@@ -50,15 +50,15 @@ variable "image_org" {
 }
 
 variable "api_image_tag" {
-  description = "ArkCloud.API image tag to deploy — \"latest\" for a first apply, a commit SHA or semver tag once CI publishes those."
+  description = "ArkCloud.API image tag to deploy. Default matches whatever arkcloud-backend-ci.yml actually publishes for the dev branch (\"dev\") — NOT \"latest\", which GHCR has never had a tag for. This default is also what the full terraform-ci.yml apply job falls back to on every push to main, so it must stay in sync with reality or it will silently overwrite whatever tag the §7 cross-repo dispatch (-target, explicit -var) last deployed."
   type        = string
-  default     = "latest"
+  default     = "dev"
 }
 
 variable "web_image_tag" {
-  description = "ArkCloud.Blazor image tag to deploy. Kept independent from api_image_tag on purpose: the cross-repo deploy trigger (see ArkCloudInfra/README.md §7) updates one app's tag at a time via `-target`, and a single shared variable would make an API-only deploy silently reset Blazor's tag back to this variable's default (or vice versa)."
+  description = "ArkCloud.Blazor image tag to deploy. Kept independent from api_image_tag on purpose: the cross-repo deploy trigger (see ArkCloudInfra/README.md §7) updates one app's tag at a time via `-target`, and a single shared variable would make an API-only deploy silently reset Blazor's tag back to this variable's default (or vice versa). Default matches arkcloud-frontend-ci.yml's actual dev-branch publish tag (\"dev\") for the same reason as api_image_tag above — \"latest\" was never a real published tag."
   type        = string
-  default     = "latest"
+  default     = "dev"
 }
 
 variable "ghcr_username" {
