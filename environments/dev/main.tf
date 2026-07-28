@@ -184,6 +184,18 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_api" {
   target_resource_id         = module.app_service_api.id
   log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
 
+  # Bug réel trouvé au premier test end-to-end (28/07) : sans ce réglage, Terraform crée le
+  # diagnostic setting en mode legacy "Azure Diagnostics" (une seule table AzureDiagnostics
+  # partagée par tout, filtrée par ResourceProvider/Category). Ça a marché en quelques minutes
+  # pour Key Vault (AuditEvent) et PostgreSQL (PostgreSQLLogs), mais AUCUNE ligne n'est jamais
+  # apparue pour les App Services (AppServiceHTTPLogs/AppServiceConsoleLogs/AppServicePlatformLogs)
+  # même après 30 min d'attente et du vrai trafic HTTP généré exprès. Le mode "Azure Diagnostics"
+  # est documenté par Microsoft comme le pipeline le moins fiable spécifiquement pour
+  # Microsoft.Web/sites — "Dedicated" (tables dédiées, une par catégorie) est le mode recommandé
+  # pour ce type de ressource. Changer cet attribut force un remplacement du diagnostic setting
+  # (delete+create), pas un update en place — normal, pas une erreur au prochain plan/apply.
+  log_analytics_destination_type = "Dedicated"
+
   enabled_log {
     category_group = "allLogs"
   }
@@ -197,6 +209,9 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
   name                       = "diag-app-arkcloud-web-${var.environment}"
   target_resource_id         = module.app_service_web.id
   log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+
+  # Même correctif que app_service_api ci-dessus — voir ce commentaire pour le pourquoi.
+  log_analytics_destination_type = "Dedicated"
 
   enabled_log {
     category_group = "allLogs"
