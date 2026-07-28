@@ -2,7 +2,7 @@
 
 Infrastructure as Code (Terraform) pour ArkCloud — Azure d'abord (Sprint 4), puis AWS (Sprint 5). Gouvernance et cycle de vie séparés du repo applicatif `ArkCloud` : une erreur de code applicatif ne touche jamais les credentials/permissions cloud, et les changements d'infra suivent leur propre revue, indépendante de celle du code.
 
-Ce document retrace en détail toutes les étapes réalisées jusqu'ici pour le Sprint 4 (CI/CD + Azure), dans l'ordre où elles ont été faites, avec les commandes exactes et les décisions prises.
+Ce document retrace en détail toutes les étapes réalisées pour le Sprint 4 (CI/CD + Azure), **clôturé le 28/07/2026**, dans l'ordre où elles ont été faites, avec les commandes exactes et les décisions prises.
 
 ---
 
@@ -10,25 +10,25 @@ Ce document retrace en détail toutes les étapes réalisées jusqu'ici pour le 
 
 | Sprint | Contenu | Statut |
 |---|---|---|
-| 4 | Fondation Azure (RG, VNet, PostgreSQL, Key Vault, Managed Identity, App Service ×2, App Insights) | ✅ Infra appliquée pour de vrai — reste CI/CD + contenu applicatif |
+| 4 | Fondation Azure (RG, VNet, PostgreSQL, Key Vault, Managed Identity, App Service ×2, App Insights) + CI/CD + monitoring + audit logging | ✅ **Clôturé (28/07/2026)** — voir §5 point 7 pour le détail de clôture |
 | 5 | Fondation AWS (VPC, ECR, ECS Fargate, ALB, RDS, Secrets Manager) | ⏳ À venir |
 | 9 | Kubernetes (AKS/EKS) — hors de ce repo, manifests dans `ArkCloud/deploy/kubernetes/` | ⏳ À venir |
 
 Voir `ArkCloud/docs/infra-roadmap.md` (repo applicatif) pour le plan complet, tous sprints confondus.
 
-**Statut réel dans Azure (mis à jour après le premier `apply` complet)** :
+**Statut réel dans Azure** :
 
 | Ressource | Nom réel |
 |---|---|
 | Resource Group | `rg-arkcloud-dev` |
-| Virtual Network | `vnet-arkcloud-dev` (+ 4 subnets, 3 NSG) |
+| Virtual Network | `vnet-arkcloud-dev` (+ 4 subnets, 4 NSG) |
 | PostgreSQL Flexible Server | `psql-arkcloud-dev` — `psql-arkcloud-dev.postgres.database.azure.com` (accès privé uniquement) |
 | Key Vault | `kv-arkcloud-dev` — `https://kv-arkcloud-dev.vault.azure.net/` |
 | App Service (API) | `app-arkcloud-api-dev` — `app-arkcloud-api-dev.azurewebsites.net` |
 | App Service (Blazor) | `app-arkcloud-web-dev` — `app-arkcloud-web-dev.azurewebsites.net` |
 | Log Analytics + App Insights | `log-arkcloud-dev` / `appi-arkcloud-dev` |
 
-Les deux App Services tournent mais n'ont pas encore d'image réelle à tirer (le registre GHCR ne contient encore rien tant qu'aucune CI n'a été déclenchée pour de vrai — §5, point 2) — c'est normal de voir une page par défaut/erreur en visitant les hostnames pour l'instant. Key Vault contient désormais `Jwt--Key` et `ConnectionStrings--DefaultConnection` (§8) — reste à valider avec du vrai trafic une fois l'image API en place.
+Les deux App Services tournent réellement (image GHCR tirée avec authentification, §5 point 6), servent du vrai trafic HTTP, et envoient à la fois de la télémétrie applicative (Application Insights, §5 point 6) et des logs d'audit/diagnostics plateforme (Key Vault, PostgreSQL, App Services — §5 point 7, §10) vers le même workspace Log Analytics.
 
 ---
 
@@ -278,8 +278,19 @@ Trois problèmes que la seule lecture du code ne pouvait pas révéler — seule
 3. ~~**Enrichir `terraform-ci.yml`**~~ ✅ Fait — `fmt`, tflint, Checkov, `init`/`validate`/`plan` réels (plan publié dans le résumé du run), job `apply` séparé gaté par l'Environment GitHub `production` avec reviewer requis. ~~Setup Azure/GitHub OIDC one-shot~~ ✅ Fait — voir §6.
 4. ~~**Brancher le déploiement continu**~~ ✅ Fait — déclenchement cross-repo `ArkCloud` → `ArkCloudInfra` via `repository_dispatch` (§7), PAT `INFRA_DISPATCH_TOKEN` créé et posé comme secret dans `ArkCloud`. Validé de bout en bout le 16/07 : push sur `develop` → CI → GHCR → dispatch reçu par `ArkCloudInfra`. Bloqué ensuite par le nouveau format immuable des subjects OIDC (voir §6 addendum) — corrigé, en attente de confirmation du rerun.
 5. ~~**Activer Key Vault pour de vrai**~~ ✅ Fait — `Jwt--Key` et `ConnectionStrings--DefaultConnection` posés dans `kv-arkcloud-dev` (§8), `app-arkcloud-api-dev` redémarré pour les prendre en compte. Validation complète (logs montrant une vraie connexion DB) reportée à après le premier push d'image réelle (point 2 ci-dessus), tant que l'App Service tourne sur le placeholder par défaut.
-6. **Vérifier le monitoring** — Application Insights remonte bien requêtes/exceptions/dépendances des deux apps une fois qu'elles serviront du vrai trafic.
-7. **Checklist de clôture Sprint 4** — sous-partie Azure/DevOps de `ArkCloud/docs/infra-roadmap.md` Step 17.
+6. ~~**Vérifier le monitoring**~~ ✅ Fait (26-28/07) — mais ça n'a pas marché du premier coup, trois bugs réels distincts découverts et corrigés en cascade :
+   - **`APPLICATIONINSIGHTS_CONNECTION_STRING` posé mais jamais lu** : la variable d'environnement était correctement câblée côté Terraform depuis le début, mais ni `ArkCloud.API` ni `ArkCloud.Blazor` n'avaient le SDK Application Insights référencé en code — `az monitor app-insights query` retournait 0 ligne indéfiniment. Corrigé en ajoutant `Microsoft.ApplicationInsights.AspNetCore` + `builder.Services.AddApplicationInsightsTelemetry()` aux deux apps (repo `ArkCloud`, commit `63dc594`). Un container Docker custom n'a pas l'auto-instrumentation "codeless" d'Azure (réservée aux stacks managées) — le SDK doit être référencé explicitement.
+   - **Les deux App Services ne tiraient aucune image réelle** : `docker_registry_username`/`password` étaient vides dans le module `app-service`, et le package GHCR était privé — `ImagePullUnauthorizedFailure` en boucle depuis le 16/07. Corrigé en ajoutant un PAT GitHub dédié (scope `read:packages` seul, classic — un fine-grained token ne fonctionne pas pour l'auth GHCR container) comme `GHCR_PAT` (secret GitHub + `TF_VAR_ghcr_pat`), câblé dans `container_registry_username`/`password` des deux modules `app-service`. **Attention** : ce secret doit être posé dans **les deux** workflows qui font un `terraform apply` (`terraform-ci.yml` ET `deploy-on-image.yml`) — l'avoir ajouté seulement au premier a fait planter le second avec "No value for required variable" au prochain dispatch.
+   - **`api_image_tag`/`web_image_tag` avaient pour défaut `"latest"`, un tag qui n'a jamais existé sur GHCR** (seuls `dev` et des SHA de commit sont publiés) — à chaque `terraform apply` complet (pas seulement le `-target` scopé du dispatch cross-repo), Terraform ramenait silencieusement le tag déployé à `latest`, cassant le déploiement réel fait par le dispatch précédent. Corrigé en alignant les défauts sur `"dev"`. Limitation connue non résolue : les deux chemins d'apply (complet vs `-target` scopé) peuvent toujours se marcher dessus si le tag réellement désiré diverge un jour du défaut — à surveiller, pas de fix structurel apporté pour l'instant.
+
+   Vérifié via `az monitor app-insights query ... "requests | order by timestamp desc"` : lignes réelles pour les deux `cloud_RoleName` (`app-arkcloud-api-dev`, `app-arkcloud-web-dev`), avec `resultCode`/`duration`/géolocalisation client.
+
+   **Gap découvert au passage, non corrigé (hors scope App Insights)** : `GET /health` renvoie 404 sur `ArkCloud.API` — aucun health check ASP.NET Core (`AddHealthChecks()`/`MapHealthChecks`) n'est implémenté en code, alors que `health_check_path = "/health"` est configuré côté Terraform. Le probe de santé natif d'Azure App Service tape dessus toutes les ~30s (visible dans Application Insights) et reçoit 404 à chaque fois. Ne bloque rien pour l'instant (l'instance n'est pas évincée), mais à corriger dans `ArkCloud` (repo applicatif) avant la prod.
+7. ~~**Checklist de clôture Sprint 4**~~ ✅ Fait (28/07) — sous-partie Azure/DevOps de `ArkCloud/docs/infra-roadmap.md` Step 17 passée en revue point par point. Deux gaps réels identifiés (pas des oublis de doc — vérifiés dans le code) :
+   - **Logs d'audit/diagnostics** : aucun `azurerm_monitor_diagnostic_setting` n'existait — Log Analytics ne recevait que la télémétrie applicative (point 6 ci-dessus), rien au niveau plateforme. Corrigé en ajoutant quatre `azurerm_monitor_diagnostic_setting` dans `environments/dev/main.tf` (Key Vault, PostgreSQL, les deux App Services), tous routés vers le workspace existant avec `enabled_log { category_group = "allLogs" }` + `metric { category = "AllMetrics" }` — le raccourci `allLogs` plutôt qu'une liste de catégories nommées, pour ne pas dépendre d'une liste figée que le provider peut faire évoluer. **Volontairement pas fait** : NSG flow logs — nécessitent `azurerm_network_watcher_flow_log` + un Storage Account dédié, une vraie brique d'infra supplémentaire plutôt qu'un réglage sur une ressource existante ; reporté au durcissement Sprint 6 avec les private endpoints.
+   - **Rotation des secrets** : aucune politique n'existait pour `POSTGRES_ADMIN_PASSWORD`, `Jwt:Key`, ou `GHCR_PAT`. Pas d'automatisation ajoutée (une vraie rotation automatique demanderait Key Vault + un mécanisme de renouvellement applicatif hors scope Terraform réaliste pour du dev) — à la place, une procédure documentée et des échéances concrètes, voir §10.
+
+   Sprint 4 clôturé sur cette base : pipeline Terraform vert de bout en bout, déploiement continu fonctionnel, monitoring applicatif vérifié, logs d'audit désormais routés vers Log Analytics. Gaps restants et volontairement non traités ici, portés aux sprints suivants : migration JFrog Artifactory (Sprint 4/5 par le roadmap), NSG flow logs et private endpoints (Sprint 6), endpoint `/health` (repo `ArkCloud`, non bloquant), conflit entre les deux chemins d'apply full vs `-target` (§7, aucun fix structurel apporté — à surveiller).
 
 ## 6. Setup Azure + GitHub requis pour que `terraform-ci.yml` tourne (one-shot manuel)
 
@@ -435,3 +446,17 @@ Le premier vrai run de `terraform-ci.yml` a remonté 28 findings sur `environmen
 - **`CKV_AZURE_222`** (App Service accessible publiquement) — désactiver l'accès public exige un point d'entrée public devant (Application Gateway ou Front Door) : une vraie nouvelle brique d'infra, portée Sprint 6+, pas un flag à inverser.
 - **`CKV_AZURE_13`** (Azure App Service Authentication / Easy Auth) — l'activer ferait doublon avec le système JWT propre à `ArkCloud.API` : deux couches d'authentification qui se marcheraient dessus, pas un vrai manque.
 - **`CKV_AZURE_88`** (App Service + Azure Files) — pensé pour des apps ayant besoin de stockage fichier persistant ; cette app est sans état, tout ce qui doit durer vit dans PostgreSQL.
+
+---
+
+## 10. Rotation des secrets — politique documentée (pas d'automatisation)
+
+Pas de mécanisme automatique de rotation en place — l'ajouter proprement demanderait un vrai pipeline de renouvellement côté Key Vault (versions de secrets + réf. `latest` + redéploiement déclenché par le changement de version), disproportionné pour un environnement dev à ce stade. À la place : une procédure manuelle claire et des échéances suivies, pour que "pas automatisé" ne veuille pas dire "oublié".
+
+| Secret | Où il vit | Échéance / déclencheur | Procédure de rotation |
+|---|---|---|---|
+| `GHCR_PAT` | Secret GitHub (`ArkCloudInfra`, les deux workflows) + `TF_VAR_ghcr_pat` | **Expire le 24/08/2026** (token classique GitHub, scope `read:packages`) — échéance dure, pas une recommandation | 1) Générer un nouveau token classique `read:packages` sur github.com/settings/tokens. 2) `gh secret set GHCR_PAT --repo epiph11/ArkCloudInfra` (valeur via variable, pas de paste interactif direct — voir le bug de corruption par newline rencontré en §5 point 6). 3) Relancer un `terraform apply` (n'importe lequel des deux workflows) pour que le nouvel App Setting soit poussé. 4) `az webapp restart` sur les deux App Services pour forcer un nouveau pull authentifié. |
+| `POSTGRES_ADMIN_PASSWORD` | Secret GitHub (`ArkCloudInfra`) + `TF_VAR_postgres_admin_password` + Key Vault (`ConnectionStrings--DefaultConnection`) | Pas d'échéance dure — à tourner a minima à chaque changement de membre d'équipe ayant eu accès, ou tous les 6 mois en routine | Changer le mot de passe côté Azure (`az postgres flexible-server update` ou portail) d'abord — **pas** via un `terraform apply` direct : `administrator_password` est en `ignore_changes` (§postgresql module) exprès pour qu'un apply non lié ne touche jamais ce mot de passe par accident. Une fois changé côté Azure, mettre à jour le secret GitHub et le secret Key Vault en cohérence, puis redémarrer l'API. |
+| `Jwt:Key` | Key Vault (`Jwt--Key`), lu par `ArkCloud.API` | Pas d'échéance dure — rotation invalide tous les tokens actifs (pas de rotation à chaud possible avec une seule clé de signature), donc à faire hors heures de forte utilisation | Générer une nouvelle valeur aléatoire (64+ octets), `az keyvault secret set --name Jwt--Key --vault-name kv-arkcloud-dev`, redémarrer l'API. Effet de bord assumé : tous les utilisateurs connectés sont déloggés (access + refresh tokens signés avec l'ancienne clé deviennent invalides). |
+
+**Ce qui manque encore pour une vraie politique de rotation (pas juste une procédure)** : aucune alerte automatique n'existe si l'échéance du `GHCR_PAT` approche sans action — à surveiller manuellement jusqu'à ce qu'un rappel (calendrier, ou check en CI comparant la date du jour à une date d'expiration stockée en variable) soit mis en place. Candidat naturel pour le Sprint 6 (durcissement sécurité).

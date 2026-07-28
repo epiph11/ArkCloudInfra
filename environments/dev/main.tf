@@ -131,3 +131,78 @@ module "app_service_web" {
 
   tags = local.common_tags
 }
+
+# ---------------------------------------------------------------------------
+# Audit / diagnostic logging — Step 17 checklist item ("Audit logging activé").
+# ---------------------------------------------------------------------------
+# Until now, Log Analytics only received *application* telemetry (App Insights SDK, see
+# README §5 point 6) — nothing at the platform level. These four diagnostic settings route
+# Key Vault access events, PostgreSQL server logs, and both App Services' platform/HTTP logs
+# into the same workspace, so an actual audit trail exists for "who read which secret" /
+# "what hit the database" / "what did each App Service serve", not just app-level requests.
+#
+# `category_group = "allLogs"` (rather than enumerating individual categories like
+# "AuditEvent" or "AppServiceHTTPLogs") is deliberate: it's the modern azurerm v4 shorthand
+# for "every log category this resource type currently exposes," so this doesn't silently
+# stop capturing a category if Azure renames/adds one later.
+#
+# NOT included here: NSG flow logs. Those need Network Watcher + a Storage Account
+# (azurerm_network_watcher_flow_log), which is meaningfully more infrastructure than a
+# diagnostic setting on an existing resource — left for Sprint 6 hardening rather than
+# folded into this pass.
+
+resource "azurerm_monitor_diagnostic_setting" "key_vault" {
+  name                       = "diag-kv-arkcloud-${var.environment}"
+  target_resource_id         = module.key_vault.id
+  log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+
+  enabled_log {
+    category_group = "allLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+  }
+}
+
+resource "azurerm_monitor_diagnostic_setting" "postgresql" {
+  name                       = "diag-psql-arkcloud-${var.environment}"
+  target_resource_id         = module.postgresql.server_id
+  log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+
+  enabled_log {
+    category_group = "allLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+  }
+}
+
+resource "azurerm_monitor_diagnostic_setting" "app_service_api" {
+  name                       = "diag-app-arkcloud-api-${var.environment}"
+  target_resource_id         = module.app_service_api.id
+  log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+
+  enabled_log {
+    category_group = "allLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+  }
+}
+
+resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
+  name                       = "diag-app-arkcloud-web-${var.environment}"
+  target_resource_id         = module.app_service_web.id
+  log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+
+  enabled_log {
+    category_group = "allLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+  }
+}
