@@ -11,7 +11,7 @@
 
 resource "aws_security_group" "alb" {
   name        = "sg-alb-${var.name_prefix}"
-  description = "Public entry point — HTTPS from the Internet, forwards to ECS target groups only."
+  description = "Public entry point - HTTPS from the Internet, forwards to ECS target groups only."
   vpc_id      = var.vpc_id
 
   ingress {
@@ -23,7 +23,7 @@ resource "aws_security_group" "alb" {
   }
 
   ingress {
-    description = "HTTP — redirected to HTTPS at the listener, not served directly"
+    description = "HTTP - redirected to HTTPS at the listener, not served directly"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -43,7 +43,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "ecs_api" {
   name        = "sg-ecs-api-${var.name_prefix}"
-  description = "ArkCloud.API Fargate tasks — the only ECS security group allowed into sg-database."
+  description = "ArkCloud.API Fargate tasks - the only ECS security group allowed into sg-database."
   vpc_id      = var.vpc_id
 
   ingress {
@@ -58,7 +58,7 @@ resource "aws_security_group" "ecs_api" {
   # and CloudWatch — all over HTTPS/postgres via the NAT Gateway. Same posture as Azure's
   # snet-api (VNet integration is outbound-only, nothing restricts egress there either).
   egress {
-    description = "All outbound — RDS, Secrets Manager, ECR/GHCR, CloudWatch via NAT"
+    description = "All outbound - RDS, Secrets Manager, ECR/GHCR, CloudWatch via NAT"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -70,7 +70,7 @@ resource "aws_security_group" "ecs_api" {
 
 resource "aws_security_group" "ecs_web" {
   name        = "sg-ecs-web-${var.name_prefix}"
-  description = "ArkCloud.Blazor Fargate tasks — deliberately absent from sg-database's ingress list."
+  description = "ArkCloud.Blazor Fargate tasks - deliberately absent from sg-database ingress list."
   vpc_id      = var.vpc_id
 
   ingress {
@@ -85,7 +85,7 @@ resource "aws_security_group" "ecs_web" {
   # CloudWatch. The isolation from PostgreSQL comes from sg-database never listing this SG as
   # a source, not from restricting egress here — see the module-level comment above.
   egress {
-    description = "All outbound — image pulls, ArkCloud.API via ALB, CloudWatch via NAT"
+    description = "All outbound - image pulls, ArkCloud.API via ALB, CloudWatch via NAT"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -97,11 +97,11 @@ resource "aws_security_group" "ecs_web" {
 
 resource "aws_security_group" "database" {
   name        = "sg-database-${var.name_prefix}"
-  description = "RDS PostgreSQL — ingress from sg-ecs-api only. sg-ecs-web is never listed here on purpose."
+  description = "RDS PostgreSQL - ingress from sg-ecs-api only. sg-ecs-web is never listed here on purpose."
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "PostgreSQL from ArkCloud.API's Fargate tasks only"
+    description     = "PostgreSQL from ArkCloud API Fargate tasks only"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
