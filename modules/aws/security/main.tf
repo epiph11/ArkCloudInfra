@@ -58,6 +58,7 @@ resource "aws_security_group" "ecs_api" {
   # and CloudWatch — all over HTTPS/postgres via the NAT Gateway. Same posture as Azure's
   # snet-api (VNet integration is outbound-only, nothing restricts egress there either).
   egress {
+    description = "All outbound — RDS, Secrets Manager, ECR/GHCR, CloudWatch via NAT"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -84,6 +85,7 @@ resource "aws_security_group" "ecs_web" {
   # CloudWatch. The isolation from PostgreSQL comes from sg-database never listing this SG as
   # a source, not from restricting egress here — see the module-level comment above.
   egress {
+    description = "All outbound — image pulls, ArkCloud.API via ALB, CloudWatch via NAT"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -109,4 +111,15 @@ resource "aws_security_group" "database" {
   # No egress rule at all — RDS doesn't initiate outbound connections, nothing to allow.
 
   tags = merge(var.tags, { Name = "sg-database-${var.name_prefix}" })
+}
+
+# --- Every VPC gets an unmanaged default security group automatically (open to itself,
+# nothing else) the moment it's created — Terraform never provisioned it, so it isn't
+# visible anywhere above. Adopting it here and stripping every rule is the standard fix
+# (Checkov CKV2_AWS_12): nothing should ever actually use this default SG (every real
+# resource gets one of the purpose-built SGs above), so an empty rule set costs nothing. ---
+resource "aws_default_security_group" "this" {
+  vpc_id = var.vpc_id
+
+  tags = merge(var.tags, { Name = "sg-default-locked-${var.name_prefix}" })
 }

@@ -89,6 +89,23 @@ jobs:
       #     auth — two overlapping auth layers, not a gap to close.
       #   - CKV_AZURE_88: Azure Files is for apps needing persistent local file storage: this
       #     app is stateless, everything durable lives in PostgreSQL.
+      #
+      # AWS findings (Sprint 5, first Checkov run against modules/aws/*) — same standard, same
+      # README §9 style, added there once this batch is confirmed green:
+      #   - CKV_AWS_260: sg-alb allows inbound 80/443 from 0.0.0.0/0 by design — it's the public
+      #     entry point behind which everything else sits; port 80 exists only to redirect to
+      #     443 at the ALB listener, never served directly.
+      #   - CKV_AWS_382: sg-ecs-api/sg-ecs-web egress is fully open (needed for RDS, Secrets
+      #     Manager, ECR/GHCR pulls, CloudWatch, all reached through the NAT Gateway) — same
+      #     posture as Azure's snet-api, which has no egress restriction either. Narrowing to
+      #     exact ports/destinations is real Sprint 6 hardening work, not a flag flip.
+      #   - CKV2_AWS_5: none of the four security groups are attached to anything YET — this
+      #     step only creates the network, ECS/ALB/RDS (which will actually use these SGs)
+      #     land in later Sprint 5 steps. Expected to self-resolve once those modules exist;
+      #     re-check once module.aws_ecs / module.aws_alb / module.aws_rds are wired in.
+      #   - CKV2_AWS_11: VPC flow logs need a destination (CloudWatch Logs group or S3) that
+      #     doesn't exist yet — same category as the Azure NSG flow logs deferred to Sprint 6
+      #     hardening alongside private endpoints.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -99,7 +116,8 @@ jobs:
           skip_check: >-
             CKV_AZURE_225,CKV_AZURE_212,CKV_AZURE_211,CKV_AZURE_136,
             CKV_AZURE_189,CKV_AZURE_109,CKV2_AZURE_32,CKV2_AZURE_57,
-            CKV_AZURE_222,CKV_AZURE_13,CKV_AZURE_88
+            CKV_AZURE_222,CKV_AZURE_13,CKV_AZURE_88,
+            CKV_AWS_260,CKV_AWS_382,CKV2_AWS_5,CKV2_AWS_11
 
       - name: terraform init
         run: terraform init

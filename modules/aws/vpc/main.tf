@@ -14,11 +14,17 @@ resource "aws_internet_gateway" "this" {
 
 # --- Public subnets — one per AZ, host the ALB and the NAT Gateway. ---
 resource "aws_subnet" "public" {
-  count                   = length(var.azs)
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.public_subnet_cidrs[count.index]
-  availability_zone       = var.azs[count.index]
-  map_public_ip_on_launch = true
+  count             = length(var.azs)
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = var.public_subnet_cidrs[count.index]
+  availability_zone = var.azs[count.index]
+
+  # Left off deliberately (Checkov CKV_AWS_130) — neither the ALB nor the NAT Gateway's EIP
+  # depend on subnet-level auto-assign to get a public IP; both manage their own public
+  # addressing explicitly (the NAT Gateway via aws_eip.nat below, the ALB via its own ENIs
+  # once modules/aws/alb exists). Nothing in this module launches a bare EC2 instance that
+  # would need this to reach the Internet, so turning it off costs nothing.
+  map_public_ip_on_launch = false
 
   tags = merge(var.tags, { Name = "snet-public-${var.azs[count.index]}-${var.name_prefix}" })
 }
