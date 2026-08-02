@@ -20,5 +20,5 @@ data "azurerm_client_config" "current" {}
 # once, manually (README §11, one-shot, same chicken-and-egg reason as the Azure App
 # Registration in §6).
 provider "aws" {
-  region = "eu-west-1"
+  region = var.aws_region
 }

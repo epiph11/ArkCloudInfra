@@ -205,6 +205,30 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_api" {
   }
 }
 
+# ---------------------------------------------------------------------------
+# AWS (Sprint 5) — same environments/dev root module and state file as Azure above, per
+# docs/infra-roadmap.md's multi-cloud decision: one `terraform apply` provisions both clouds
+# rather than splitting into a second root module to keep in sync by hand.
+# ---------------------------------------------------------------------------
+
+module "aws_vpc" {
+  source = "../../modules/aws/vpc"
+
+  name_prefix = "arkcloud-${var.environment}"
+  azs         = var.aws_azs
+
+  tags = local.common_tags
+}
+
+module "aws_security" {
+  source = "../../modules/aws/security"
+
+  name_prefix = "arkcloud-${var.environment}"
+  vpc_id      = module.aws_vpc.vpc_id
+
+  tags = local.common_tags
+}
+
 resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
   name                       = "diag-app-arkcloud-web-${var.environment}"
   target_resource_id         = module.app_service_web.id

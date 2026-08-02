@@ -72,3 +72,17 @@ variable "ghcr_pat" {
   type        = string
   sensitive   = true
 }
+
+# --- AWS (Sprint 5) ---
+
+variable "aws_region" {
+  description = "Kept as a variable (not just hardcoded in providers.tf's provider block) so modules that need to build ARNs/endpoint URLs referencing the region don't have to re-derive it from a data source."
+  type        = string
+  default     = "eu-west-1"
+}
+
+variable "aws_azs" {
+  description = "Exactly two — matches modules/aws/vpc's public/ecs/database subnet pairs. eu-west-1a/b chosen arbitrarily; eu-west-1 has a third (1c) not used here."
+  type        = list(string)
+  default     = ["eu-west-1a", "eu-west-1b"]
+}

@@ -10,3 +10,11 @@ plugin "azurerm" {
   version = "0.27.0"
   source  = "github.com/terraform-linters/tflint-ruleset-azurerm"
 }
+
+# Sprint 5 — AWS-specific rules (deprecated arguments, invalid instance types, etc.), same
+# reasoning as azurerm above: the base ruleset doesn't know AWS resource schemas.
+plugin "aws" {
+  enabled = true
+  version = "0.35.0"
+  source  = "github.com/terraform-linters/tflint-ruleset-aws"
+}
