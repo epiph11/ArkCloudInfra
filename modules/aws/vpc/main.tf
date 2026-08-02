@@ -12,6 +12,20 @@ resource "aws_internet_gateway" "this" {
   tags   = merge(var.tags, { Name = "igw-${var.name_prefix}" })
 }
 
+# --- Every VPC gets an unmanaged default security group automatically (open to itself,
+# nothing else) the moment it's created — Terraform never provisioned it, so it isn't
+# visible anywhere by default. Adopting it here and stripping every rule is the standard fix
+# (Checkov CKV2_AWS_12): nothing should ever actually use this default SG (every real
+# resource gets one of the purpose-built SGs in modules/aws/security), so an empty rule set
+# costs nothing. Kept in this module rather than modules/aws/security so it sits next to
+# aws_vpc.this directly — Checkov's cross-module graph analysis didn't reliably link the two
+# when this lived in the security module and referenced the VPC only via var.vpc_id.
+resource "aws_default_security_group" "this" {
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(var.tags, { Name = "sg-default-locked-${var.name_prefix}" })
+}
+
 # --- Public subnets — one per AZ, host the ALB and the NAT Gateway. ---
 resource "aws_subnet" "public" {
   count             = length(var.azs)
