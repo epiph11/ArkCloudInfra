@@ -28,6 +28,7 @@ env:
   ARM_USE_OIDC: true
   TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
   TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+  TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
   TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
 
 jobs:
@@ -106,6 +107,21 @@ jobs:
       #   - CKV2_AWS_11: VPC flow logs need a destination (CloudWatch Logs group or S3) that
       #     doesn't exist yet — same category as the Azure NSG flow logs deferred to Sprint 6
       #     hardening alongside private endpoints.
+      #
+      # RDS (Sprint 5, Step 12, modules/aws/rds) — same dev-tier reasoning as the Azure
+      # PostgreSQL skips above (CKV_AZURE_136/212 etc.). Codes below are a best guess from
+      # Checkov's known RDS check set (no local Checkov in this sandbox to confirm exact IDs —
+      # same workflow as the rest of this session: adjust on the first real run's actual output):
+      #   - CKV_AWS_157: Multi-AZ — single-AZ is the deliberate dev-cost call, same as the
+      #     single NAT Gateway in modules/aws/vpc. Override multi_az for staging/prod.
+      #   - CKV_AWS_118: Performance Insights — db.t3.micro doesn't meaningfully support it
+      #     (too little memory to be useful); revisit with a larger instance class.
+      #   - CKV_AWS_293: deletion protection — off on purpose so `terraform destroy` can tear
+      #     dev down cleanly; on for staging/prod.
+      #   - CKV_AWS_354: enhanced monitoring — extra cost for a dev instance nobody is
+      #     paging on; CloudWatch Logs exports (postgresql/upgrade) are already enabled, this
+      #     is the deeper per-second OS-level metric stream, deferred to Step 15 alongside the
+      #     rest of AWS monitoring.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -117,7 +133,8 @@ jobs:
             CKV_AZURE_225,CKV_AZURE_212,CKV_AZURE_211,CKV_AZURE_136,
             CKV_AZURE_189,CKV_AZURE_109,CKV2_AZURE_32,CKV2_AZURE_57,
             CKV_AZURE_222,CKV_AZURE_13,CKV_AZURE_88,
-            CKV_AWS_260,CKV_AWS_382,CKV2_AWS_5,CKV2_AWS_11
+            CKV_AWS_260,CKV_AWS_382,CKV2_AWS_5,CKV2_AWS_11,
+            CKV_AWS_157,CKV_AWS_118,CKV_AWS_293,CKV_AWS_354
 
       - name: terraform init
         run: terraform init

@@ -86,3 +86,23 @@ variable "aws_azs" {
   type        = list(string)
   default     = ["eu-west-1a", "eu-west-1b"]
 }
+
+# --- AWS RDS PostgreSQL (Sprint 5, Step 12) ---
+
+variable "aws_postgres_admin_login" {
+  type      = string
+  sensitive = true
+  default   = "arkcloudadmin"
+}
+
+variable "aws_postgres_admin_password" {
+  description = "Never put a literal value here or in terraform.tfvars — supply via TF_VAR_aws_postgres_admin_password (local) or a CI secret (pipeline). Kept separate from postgres_admin_password (Azure): each cloud's credential rotates independently."
+  type        = string
+  sensitive   = true
+}
+
+variable "aws_postgres_instance_class" {
+  description = "db.t3.micro (burstable, cheapest) for dev — mirrors postgres_sku's B_Standard_B1ms on the Azure side. Use a larger, non-burstable class for staging/prod."
+  type        = string
+  default     = "db.t3.micro"
+}

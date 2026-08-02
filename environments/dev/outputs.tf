@@ -31,3 +31,11 @@ output "aws_ecs_subnet_ids" {
 output "aws_database_subnet_ids" {
   value = module.aws_vpc.database_subnet_ids
 }
+
+output "aws_postgres_endpoint" {
+  value = module.aws_rds.endpoint
+}
+
+output "aws_postgres_database_name" {
+  value = module.aws_rds.database_name
+}

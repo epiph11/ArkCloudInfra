@@ -229,6 +229,24 @@ module "aws_security" {
   tags = local.common_tags
 }
 
+# Step 12 — Amazon RDS PostgreSQL. Only depends on the network module (private database
+# subnets + sg-database) — no dependency on ECS/ALB, which is why it lands before Step 11
+# (ECS Fargate) in build order even though the roadmap numbers it after.
+module "aws_rds" {
+  source = "../../modules/aws/rds"
+
+  name_prefix    = "arkcloud-${var.environment}"
+  instance_class = var.aws_postgres_instance_class
+
+  master_username = var.aws_postgres_admin_login
+  master_password = var.aws_postgres_admin_password
+
+  db_subnet_group_name = module.aws_vpc.db_subnet_group_name
+  security_group_id    = module.aws_security.database_security_group_id
+
+  tags = local.common_tags
+}
+
 resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
   name                       = "diag-app-arkcloud-web-${var.environment}"
   target_resource_id         = module.app_service_web.id

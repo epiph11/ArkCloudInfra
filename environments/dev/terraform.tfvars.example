@@ -1,12 +1,13 @@
 # Copy this file to terraform.tfvars and fill in the values below.
 # terraform.tfvars is gitignored (see .gitignore) — never commit it once it contains real values.
 #
-# postgres_admin_password is deliberately NOT here, even as a placeholder — set it via an
-# environment variable instead, so it never touches a file at all:
+# postgres_admin_password / aws_postgres_admin_password are deliberately NOT here, even as
+# placeholders — set them via environment variables instead, so they never touch a file at all:
 #
-#   $env:TF_VAR_postgres_admin_password = "<a strong random value>"   (PowerShell, this session only)
+#   $env:TF_VAR_postgres_admin_password = "<a strong random value>"       (PowerShell, this session only, Azure)
+#   $env:TF_VAR_aws_postgres_admin_password = "<a different strong random value>"   (AWS — separate credential, rotates independently)
 #
-# In CI, set it as a pipeline secret exposed the same way (TF_VAR_postgres_admin_password).
+# In CI, set them as pipeline secrets exposed the same way.
 
 location    = "westeurope"
 environment = "dev"
@@ -17,6 +18,8 @@ web_image_tag = "latest"
 
 postgres_sku     = "B_Standard_B1ms"
 app_service_sku  = "B1"
+
+aws_postgres_instance_class = "db.t3.micro"
 
 tags = {
   owner = "epiphane"
