@@ -43,6 +43,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # TEMPORAIRE — debug du claim `sub` réel envoyé par GitHub pour ce trigger. À retirer une
+      # fois la trust policy AWS corrigée (même classe de bug que le federated credential Azure
+      # rencontré plus tôt dans ce sprint : les repos créés après le cutover GitHub utilisent un
+      # format de sub immuable basé sur des IDs numériques, pas "repo:OWNER/REPO:...").
+      - name: Debug OIDC sub claim
+        run: |
+          curl -sLS "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            | jq -r '.value' | cut -d. -f2 | base64 -d 2>/dev/null | jq .
+
       # Sprint 5 — same OIDC pattern as Azure just above: no static AWS access key stored,
       # this action exchanges the job's GitHub OIDC token for temporary credentials by
       # assuming arkcloudinfra-ci (trust policy scoped to this repo, see README §11). The
