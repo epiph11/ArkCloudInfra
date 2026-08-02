@@ -36,6 +36,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Sprint 5 — needed even though this job's -target never touches an AWS resource:
+      # Terraform configures every provider block declared in the config (providers.tf) during
+      # init/plan, regardless of -target, so the aws provider still needs valid credentials or
+      # this job fails trying to authenticate it. Same OIDC pattern as Azure below.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false

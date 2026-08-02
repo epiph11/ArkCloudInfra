@@ -43,6 +43,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Sprint 5 — same OIDC pattern as Azure just above: no static AWS access key stored,
+      # this action exchanges the job's GitHub OIDC token for temporary credentials by
+      # assuming arkcloudinfra-ci (trust policy scoped to this repo, see README §11). The
+      # provider "aws" block in providers.tf has no explicit credentials config — it just
+      # picks up the AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY/SESSION_TOKEN env vars this step sets.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
@@ -123,6 +134,12 @@ jobs:
         working-directory: environments/dev
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
 
       - uses: hashicorp/setup-terraform@v3
         with:
