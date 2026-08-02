@@ -10,7 +10,9 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_security_group" "alb" {
-  name        = "sg-alb-${var.name_prefix}"
+  # AWS reserves the "sg-" prefix for its own generated security group IDs — the `name`
+  # argument can't start with it (tags.Name below is unrestricted, kept as sg-* for readability).
+  name        = "alb-${var.name_prefix}"
   description = "Public entry point - HTTPS from the Internet, forwards to ECS target groups only."
   vpc_id      = var.vpc_id
 
@@ -42,7 +44,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_security_group" "ecs_api" {
-  name        = "sg-ecs-api-${var.name_prefix}"
+  name        = "ecs-api-${var.name_prefix}"
   description = "ArkCloud.API Fargate tasks - the only ECS security group allowed into sg-database."
   vpc_id      = var.vpc_id
 
@@ -69,7 +71,7 @@ resource "aws_security_group" "ecs_api" {
 }
 
 resource "aws_security_group" "ecs_web" {
-  name        = "sg-ecs-web-${var.name_prefix}"
+  name        = "ecs-web-${var.name_prefix}"
   description = "ArkCloud.Blazor Fargate tasks - deliberately absent from sg-database ingress list."
   vpc_id      = var.vpc_id
 
@@ -96,7 +98,7 @@ resource "aws_security_group" "ecs_web" {
 }
 
 resource "aws_security_group" "database" {
-  name        = "sg-database-${var.name_prefix}"
+  name        = "database-${var.name_prefix}"
   description = "RDS PostgreSQL - ingress from sg-ecs-api only. sg-ecs-web is never listed here on purpose."
   vpc_id      = var.vpc_id
 
