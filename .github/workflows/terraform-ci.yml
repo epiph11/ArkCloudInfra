@@ -68,6 +68,14 @@ jobs:
           tflint_version: v0.55.1
 
       - name: tflint
+        # GITHUB_TOKEN authenticates tflint's plugin-install requests to api.github.com —
+        # unauthenticated requests share a 60/hour rate limit across every job on the runner's
+        # IP, which is easy to hit on a day with many CI runs (real cause of the intermittent
+        # "Failed to download checksums.txt: ... 500" seen twice in a row on this exact step).
+        # Authenticated requests get 5000/hour. Uses the token GitHub Actions already injects
+        # for free — no new secret to create.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tflint --init --config="${{ github.workspace }}/.tflint.hcl"
           tflint --config="${{ github.workspace }}/.tflint.hcl" --recursive
