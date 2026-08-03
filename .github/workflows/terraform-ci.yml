@@ -9,12 +9,14 @@ on:
       - "modules/**"
       - "environments/**"
       - ".github/workflows/terraform-ci.yml"
+      - ".tflint.hcl"
   push:
     branches: [main]
     paths:
       - "modules/**"
       - "environments/**"
       - ".github/workflows/terraform-ci.yml"
+      - ".tflint.hcl"
 
 permissions:
   id-token: write   # nécessaire pour qu'Azure AD délivre un jeton OIDC à ce run
