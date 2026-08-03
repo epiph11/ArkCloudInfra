@@ -39,3 +39,11 @@ output "aws_postgres_endpoint" {
 output "aws_postgres_database_name" {
   value = module.aws_rds.database_name
 }
+
+output "aws_postgres_secret_arn" {
+  value = module.aws_secrets.postgres_secret_arn
+}
+
+output "aws_jwt_secret_arn" {
+  value = module.aws_secrets.jwt_secret_arn
+}

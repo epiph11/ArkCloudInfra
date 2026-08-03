@@ -247,6 +247,17 @@ module "aws_rds" {
   tags = local.common_tags
 }
 
+# Step 13 (AWS side) — secret containers only, same "no values via Terraform" rule as
+# modules/azure/key-vault. IAM read access gets attached to the ECS task role once it exists
+# (Step 11) — these just need to exist first so that policy has an ARN to reference.
+module "aws_secrets" {
+  source = "../../modules/aws/secrets"
+
+  name_prefix = "arkcloud-${var.environment}"
+
+  tags = local.common_tags
+}
+
 resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
   name                       = "diag-app-arkcloud-web-${var.environment}"
   target_resource_id         = module.app_service_web.id
