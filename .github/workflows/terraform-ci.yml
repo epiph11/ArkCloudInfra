@@ -109,19 +109,26 @@ jobs:
       #     hardening alongside private endpoints.
       #
       # RDS (Sprint 5, Step 12, modules/aws/rds) — same dev-tier reasoning as the Azure
-      # PostgreSQL skips above (CKV_AZURE_136/212 etc.).
+      # PostgreSQL skips above (CKV_AZURE_136/212 etc.). Confirmed one at a time against real
+      # Checkov output (no local Checkov in this sandbox to run the whole set upfront) —
+      # IDs/meanings below are what the tool actually reported, not guesses:
       #   - CKV_AWS_157: Multi-AZ — single-AZ is the deliberate dev-cost call, same as the
       #     single NAT Gateway in modules/aws/vpc. Override multi_az for staging/prod.
       #   - CKV_AWS_353: Performance Insights — db.t3.micro doesn't meaningfully support it
-      #     (too little memory to be useful); revisit with a larger instance class. (First
-      #     guessed as CKV_AWS_118 without a local Checkov to confirm — the actual run
-      #     against modules/aws/rds returned CKV_AWS_353 for this exact check; corrected here.)
+      #     (too little memory to be useful); revisit with a larger instance class.
+      #   - CKV_AWS_118: Enhanced Monitoring (monitoring_interval + IAM role, per-second OS
+      #     metrics) — extra cost/infra for a dev instance nobody is paging on. Distinct from
+      #     CKV_AWS_353 above, not a duplicate — Checkov's own output confirmed both are real,
+      #     separate checks. CloudWatch Logs exports (postgresql/upgrade) are already enabled;
+      #     this is the deeper metric stream, deferred to Step 15 alongside AWS monitoring.
       #   - CKV_AWS_293: deletion protection — off on purpose so `terraform destroy` can tear
       #     dev down cleanly; on for staging/prod.
-      #   - CKV_AWS_354: enhanced monitoring — extra cost for a dev instance nobody is
-      #     paging on; CloudWatch Logs exports (postgresql/upgrade) are already enabled, this
-      #     is the deeper per-second OS-level metric stream, deferred to Step 15 alongside the
-      #     rest of AWS monitoring.
+      #   - CKV_AWS_354: kept as a defensive skip but never actually confirmed against a real
+      #     run (every run so far failed on one check at a time — 30, then 353, then 118 — and
+      #     354 has yet to come up on its own). Since 118 turned out to be Enhanced Monitoring,
+      #     354 is NOT that; its real meaning is still unverified. Leave it until either it
+      #     shows up as an actual failure (then confirm+document properly) or a later cleanup
+      #     pass removes it as unused.
       #
       # NOT skipped — fixed instead: CKV2_AWS_30 (Postgres query logging) was the first real
       # finding here, resolved by adding log_statement=ddl + log_min_duration_statement=1000
