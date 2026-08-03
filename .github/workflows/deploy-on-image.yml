@@ -59,14 +59,53 @@ jobs:
       # pour cette variable dans ce run), ce qui redéploierait Blazor avec "latest" sans
       # raison. -target évite complètement ce problème : Terraform ne touche à rien d'autre
       # que la ressource ciblée, quelle que soit la valeur résolue des autres variables.
+      #
+      # Task #38 — added the AWS ECS -target alongside the existing Azure one: api_image_tag/
+      # web_image_tag already drive both clouds (single var, single state file, see
+      # environments/dev/main.tf), so no new variable was needed — just a second -target so
+      # Terraform actually touches the ECS service too instead of silently ignoring it.
+      #
+      # Guarded to dev: only environments/dev has an aws_ecs_service_api/web module today
+      # (Sprint 5). staging/prod land with Sprints 6-10 — drop the guard once those modules
+      # exist there too.
       - name: terraform apply (image tag only)
         run: |
           if [ "${{ github.event.client_payload.app }}" = "api" ]; then
-            terraform apply -auto-approve -input=false \
-              -target=module.app_service_api.azurerm_linux_web_app.this \
-              -var "api_image_tag=${{ github.event.client_payload.tag }}"
+            if [ "${{ github.event.client_payload.environment }}" = "dev" ]; then
+              terraform apply -auto-approve -input=false \
+                -target=module.app_service_api.azurerm_linux_web_app.this \
+                -target=module.aws_ecs_service_api.aws_ecs_service.this \
+                -var "api_image_tag=${{ github.event.client_payload.tag }}"
+            else
+              terraform apply -auto-approve -input=false \
+                -target=module.app_service_api.azurerm_linux_web_app.this \
+                -var "api_image_tag=${{ github.event.client_payload.tag }}"
+            fi
           else
-            terraform apply -auto-approve -input=false \
-              -target=module.app_service_web.azurerm_linux_web_app.this \
-              -var "web_image_tag=${{ github.event.client_payload.tag }}"
+            if [ "${{ github.event.client_payload.environment }}" = "dev" ]; then
+              terraform apply -auto-approve -input=false \
+                -target=module.app_service_web.azurerm_linux_web_app.this \
+                -target=module.aws_ecs_service_web.aws_ecs_service.this \
+                -var "web_image_tag=${{ github.event.client_payload.tag }}"
+            else
+              terraform apply -auto-approve -input=false \
+                -target=module.app_service_web.azurerm_linux_web_app.this \
+                -var "web_image_tag=${{ github.event.client_payload.tag }}"
+            fi
           fi
+
+      # ECS only re-pulls an image when something in the task definition actually changes.
+      # dev/staging publish under a floating tag (":dev"/":staging") that's identical run to
+      # run, so the terraform apply above can be a true no-op even though a new image just
+      # landed in ECR — force-new-deployment makes ECS redeploy the service against whatever
+      # the tag currently resolves to, regardless of whether Terraform saw a diff. Harmless
+      # to run even when the tag genuinely changed (e.g. a version tag) — it's an idempotent
+      # extra rollout, not a duplicate one.
+      - name: Force ECS to pull the latest image
+        if: github.event.client_payload.environment == 'dev'
+        run: |
+          aws ecs update-service \
+            --cluster arkcloud-arkcloud-dev \
+            --service arkcloud-arkcloud-dev-${{ github.event.client_payload.app }} \
+            --force-new-deployment \
+            --region eu-west-1
