@@ -2,15 +2,35 @@
 # which enforces TLS out of the box (see modules/azure/postgresql's comment on
 # require_secure_transport). A dedicated parameter group is the only way to flip it, since
 # it isn't an attribute on aws_db_instance itself.
+#
+# Also carries query-level audit logging: log_statement="ddl" logs schema changes
+# (CREATE/ALTER/DROP — security-relevant, low volume) without logging every SELECT/INSERT,
+# which would be both noisy and a real risk of leaking customer data or query params into
+# CloudWatch Logs. log_min_duration_statement=1000 separately logs any query slower than 1s
+# regardless of type — a performance signal, not an audit one. Together these are the AWS
+# counterpart to PostgreSQL Flexible Server's own log settings on the Azure side, and both
+# feed the "postgresql" CloudWatch log export already enabled on aws_db_instance.this below.
 resource "aws_db_parameter_group" "postgres16" {
   name_prefix = "pg16-${var.name_prefix}-"
   family      = "postgres16"
-  description = "Forces SSL (rds.force_ssl=1) to match Azure Flexible Server's default-on TLS enforcement."
+  description = "Forces SSL (rds.force_ssl=1); log_statement=ddl + log_min_duration_statement=1000 for query/audit logging."
 
   parameter {
     name         = "rds.force_ssl"
     value        = "1"
     apply_method = "pending-reboot"
+  }
+
+  parameter {
+    name         = "log_statement"
+    value        = "ddl"
+    apply_method = "immediate"
+  }
+
+  parameter {
+    name         = "log_min_duration_statement"
+    value        = "1000"
+    apply_method = "immediate"
   }
 
   tags = var.tags
