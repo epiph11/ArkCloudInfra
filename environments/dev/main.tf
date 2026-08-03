@@ -258,6 +258,106 @@ module "aws_secrets" {
   tags = local.common_tags
 }
 
+# ---------------------------------------------------------------------------
+# Step 11 — ECR, ECS Fargate, ALB. Registry decision (task #33): ECR now, JFrog later as
+# separate work. IMPORTANT — ArkCloud's own CI (arkcloud-backend-ci.yml/arkcloud-frontend-ci.yml,
+# in the ArkCloud repo, not this one) still only pushes to GHCR today. Until that's updated to
+# also push to the two ECR repos below, `terraform apply` here succeeds but the ECS tasks will
+# fail to start with CannotPullContainerError — the AWS equivalent of Sprint 4's "image never
+# existed" bug. Tracked to fix before Step 11 is actually verified end-to-end (task #38).
+#
+# ALSO IMPORTANT — the "secrets" env var names below (ConnectionStrings__DefaultConnection,
+# Jwt__Key) are assumptions based on .NET's "__" config-nesting convention and the existing
+# Jwt--Key Key Vault secret name, NOT confirmed against ArkCloud.API's actual appsettings.json/
+# Program.cs in this session. Verify the real config key names before relying on this — wrong
+# names mean the app silently falls back to whatever default connection string/JWT key its
+# appsettings.json ships with, not a visible error.
+# ---------------------------------------------------------------------------
+
+module "aws_ecr" {
+  source = "../../modules/aws/ecr"
+
+  name_prefix = "arkcloud-${var.environment}"
+
+  tags = local.common_tags
+}
+
+module "aws_ecs" {
+  source = "../../modules/aws/ecs"
+
+  name_prefix = "arkcloud-${var.environment}"
+
+  postgres_secret_arn = module.aws_secrets.postgres_secret_arn
+  jwt_secret_arn      = module.aws_secrets.jwt_secret_arn
+
+  tags = local.common_tags
+}
+
+module "aws_alb" {
+  source = "../../modules/aws/alb"
+
+  name_prefix       = "arkcloud-${var.environment}"
+  vpc_id            = module.aws_vpc.vpc_id
+  public_subnet_ids = module.aws_vpc.public_subnet_ids
+  security_group_id = module.aws_security.alb_security_group_id
+
+  tags = local.common_tags
+}
+
+module "aws_ecs_service_api" {
+  source = "../../modules/aws/ecs-service"
+
+  name_prefix  = "arkcloud-${var.environment}"
+  service_name = "api"
+
+  cluster_id          = module.aws_ecs.cluster_id
+  execution_role_arn  = module.aws_ecs.execution_role_arn
+  task_role_arn       = module.aws_ecs.task_role_arn
+  subnet_ids          = module.aws_vpc.ecs_subnet_ids
+  security_group_id   = module.aws_security.ecs_api_security_group_id
+  target_group_arn    = module.aws_alb.api_target_group_arn
+  container_image     = module.aws_ecr.api_repository_url
+  container_image_tag = var.api_image_tag
+
+  environment = {
+    ASPNETCORE_ENVIRONMENT = "Production"
+  }
+
+  # See the module-level comment above — verify these two config key names against the real
+  # app before treating this as working.
+  secrets = {
+    ConnectionStrings__DefaultConnection = module.aws_secrets.postgres_secret_arn
+    Jwt__Key                             = module.aws_secrets.jwt_secret_arn
+  }
+
+  tags = local.common_tags
+}
+
+module "aws_ecs_service_web" {
+  source = "../../modules/aws/ecs-service"
+
+  name_prefix  = "arkcloud-${var.environment}"
+  service_name = "web"
+
+  cluster_id          = module.aws_ecs.cluster_id
+  execution_role_arn  = module.aws_ecs.execution_role_arn
+  task_role_arn       = module.aws_ecs.task_role_arn
+  subnet_ids          = module.aws_vpc.ecs_subnet_ids
+  security_group_id   = module.aws_security.ecs_web_security_group_id
+  target_group_arn    = module.aws_alb.web_target_group_arn
+  container_image     = module.aws_ecr.web_repository_url
+  container_image_tag = var.web_image_tag
+
+  # Blazor never touches the DB/JWT secrets directly (mirrors Azure's app_service_web having
+  # no Key Vault role assignment) — no `secrets` block needed here.
+  environment = {
+    ASPNETCORE_ENVIRONMENT = "Production"
+    Api__BaseUrl           = "http://${module.aws_alb.alb_dns_name}/api"
+  }
+
+  tags = local.common_tags
+}
+
 resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
   name                       = "diag-app-arkcloud-web-${var.environment}"
   target_resource_id         = module.app_service_web.id

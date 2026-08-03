@@ -47,3 +47,19 @@ output "aws_postgres_secret_arn" {
 output "aws_jwt_secret_arn" {
   value = module.aws_secrets.jwt_secret_arn
 }
+
+output "aws_ecr_api_repository_url" {
+  value = module.aws_ecr.api_repository_url
+}
+
+output "aws_ecr_web_repository_url" {
+  value = module.aws_ecr.web_repository_url
+}
+
+output "aws_ecs_cluster_name" {
+  value = module.aws_ecs.cluster_name
+}
+
+output "aws_alb_dns_name" {
+  value = module.aws_alb.alb_dns_name
+}
