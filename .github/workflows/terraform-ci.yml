@@ -156,6 +156,27 @@ jobs:
       #     and this project's rotation policy is documented as manual-only (README §10) for
       #     every secret on both clouds. Building a rotation Lambda for a secret nothing reads
       #     yet is real Sprint 6+ hardening work, not a flag flip.
+      #
+      # ECR / ALB / ECS (Sprint 5, Step 11, modules/aws/ecr+alb+ecs+ecs-service) — all 11 codes
+      # below are confirmed directly from a real Checkov run (no guessing this time):
+      #   - CKV_AWS_150: ALB deletion protection off — same "destroy cleanly" dev-tier call as
+      #     RDS's deletion_protection and the ECR repos' force_delete.
+      #   - CKV_AWS_91: ALB access logging — needs an S3 bucket + delivery policy, real infra
+      #     not a flag flip. Deferred to Step 15 (Monitoring AWS), where the actual logging
+      #     destinations get built rather than bolted onto the ALB module in isolation.
+      #   - CKV_AWS_2, CKV2_AWS_20, CKV_AWS_103, CKV_AWS_378: HTTPS listener, HTTP->HTTPS
+      #     redirect, TLS 1.2, target-group-not-HTTP — all four blocked by the same real
+      #     dependency: no custom domain exists yet on either cloud, so there's no ACM cert to
+      #     attach. Symmetric limitation with Azure, which also has no custom domain/TLS beyond
+      #     the platform default *.azurewebsites.net. Sprint 6 hardening once a domain exists.
+      #   - CKV_AWS_136, CKV_AWS_158: ECR / CloudWatch Log Group KMS CMK — default AWS-managed
+      #     key, same "managed key is enough for dev" call already made for RDS storage
+      #     encryption and the Secrets Manager containers (CKV_AWS_149 above).
+      #   - CKV_AWS_51: ECR tag mutability — deliberately MUTABLE, matches the existing floating
+      #     "dev" tag re-push pattern already used identically on the Azure App Service side.
+      #   - CKV_AWS_338: CloudWatch log retention >= 365 days — 30 days is enough for dev.
+      #   - CKV2_AWS_28: ALB not behind a WAF — real cost/infra, Sprint 6 hardening candidate,
+      #     same category as the other deferred hardening items (private endpoints, flow logs).
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -169,7 +190,10 @@ jobs:
             CKV_AZURE_222,CKV_AZURE_13,CKV_AZURE_88,
             CKV_AWS_260,CKV_AWS_382,CKV2_AWS_5,CKV2_AWS_11,
             CKV_AWS_157,CKV_AWS_353,CKV_AWS_118,CKV_AWS_293,CKV_AWS_354,
-            CKV_AWS_149,CKV2_AWS_57
+            CKV_AWS_149,CKV2_AWS_57,
+            CKV_AWS_150,CKV_AWS_91,CKV_AWS_2,CKV2_AWS_20,CKV_AWS_103,
+            CKV_AWS_378,CKV_AWS_136,CKV_AWS_158,CKV_AWS_51,CKV_AWS_338,
+            CKV2_AWS_28
 
       - name: terraform init
         run: terraform init
