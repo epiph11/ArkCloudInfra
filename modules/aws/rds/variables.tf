@@ -33,8 +33,9 @@ variable "multi_az" {
 }
 
 variable "backup_retention_period" {
-  type    = number
-  default = 7
+  description = "1 for dev — this AWS account is on the Free Tier plan, which rejects CreateDBInstance with FreeTierRestrictionError above some undocumented retention cap (7 was too high; AWS doesn't publish the exact allowed value). 1 still keeps automated backups on rather than disabling them (0 would). Override higher for staging/prod, where the account presumably isn't Free Tier-restricted."
+  type        = number
+  default     = 1
 }
 
 variable "database_name" {

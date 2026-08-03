@@ -160,7 +160,7 @@ resource "azurerm_monitor_diagnostic_setting" "key_vault" {
     category_group = "allLogs"
   }
 
-  metric {
+  enabled_metric {
     category = "AllMetrics"
   }
 }
@@ -174,7 +174,7 @@ resource "azurerm_monitor_diagnostic_setting" "postgresql" {
     category_group = "allLogs"
   }
 
-  metric {
+  enabled_metric {
     category = "AllMetrics"
   }
 }
@@ -200,7 +200,7 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_api" {
     category_group = "allLogs"
   }
 
-  metric {
+  enabled_metric {
     category = "AllMetrics"
   }
 }
@@ -259,7 +259,7 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
     category_group = "allLogs"
   }
 
-  metric {
+  enabled_metric {
     category = "AllMetrics"
   }
 }
