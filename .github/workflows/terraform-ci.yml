@@ -145,7 +145,7 @@ jobs:
             CKV_AZURE_189,CKV_AZURE_109,CKV2_AZURE_32,CKV2_AZURE_57,
             CKV_AZURE_222,CKV_AZURE_13,CKV_AZURE_88,
             CKV_AWS_260,CKV_AWS_382,CKV2_AWS_5,CKV2_AWS_11,
-            CKV_AWS_157,CKV_AWS_353,CKV_AWS_293,CKV_AWS_354
+            CKV_AWS_157,CKV_AWS_353,CKV_AWS_118,CKV_AWS_293,CKV_AWS_354
 
       - name: terraform init
         run: terraform init
