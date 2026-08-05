@@ -21,6 +21,11 @@ app_service_sku  = "B1"
 
 aws_postgres_instance_class = "db.t3.micro"
 
+# Optional (task #37) — subscribes this address to CloudWatch alarm notifications. Leave
+# commented out to skip email delivery entirely; alarms still fire and are visible in the
+# console/CLI either way.
+# aws_alarm_email = "you@example.com"
+
 tags = {
   owner = "epiphane"
 }

@@ -63,3 +63,15 @@ output "aws_ecs_cluster_name" {
 output "aws_alb_dns_name" {
   value = module.aws_alb.alb_dns_name
 }
+
+output "aws_monitoring_dashboard_name" {
+  value = module.aws_monitoring.dashboard_name
+}
+
+output "aws_alerts_sns_topic_arn" {
+  value = module.aws_monitoring.sns_topic_arn
+}
+
+output "aws_cloudtrail_bucket_name" {
+  value = module.aws_cloudtrail.bucket_name
+}

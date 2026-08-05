@@ -358,6 +358,47 @@ module "aws_ecs_service_web" {
   tags = local.common_tags
 }
 
+# --- AWS monitoring & audit (Step 15, task #37) ---
+
+module "aws_cloudtrail" {
+  source = "../../modules/aws/cloudtrail"
+
+  name_prefix = "arkcloud-${var.environment}"
+  tags        = local.common_tags
+}
+
+locals {
+  # CloudWatch's ALB/TargetGroup dimensions want the ARN's resource segment, not the full ARN —
+  # and inconsistently: LoadBalancer drops the "loadbalancer/" prefix, TargetGroup keeps
+  # "targetgroup/". See modules/aws/monitoring/variables.tf for why.
+  aws_alb_arn_suffix    = trimprefix(split(":", module.aws_alb.alb_arn)[5], "loadbalancer/")
+  aws_api_tg_arn_suffix = split(":", module.aws_alb.api_target_group_arn)[5]
+  aws_web_tg_arn_suffix = split(":", module.aws_alb.web_target_group_arn)[5]
+}
+
+module "aws_monitoring" {
+  source = "../../modules/aws/monitoring"
+
+  name_prefix = "arkcloud-${var.environment}"
+
+  ecs_cluster_name = module.aws_ecs.cluster_name
+  api_service_name = module.aws_ecs_service_api.service_name
+  web_service_name = module.aws_ecs_service_web.service_name
+
+  api_log_group_name = module.aws_ecs_service_api.log_group_name
+  web_log_group_name = module.aws_ecs_service_web.log_group_name
+
+  alb_arn_suffix              = local.aws_alb_arn_suffix
+  api_target_group_arn_suffix = local.aws_api_tg_arn_suffix
+  web_target_group_arn_suffix = local.aws_web_tg_arn_suffix
+
+  rds_instance_id = module.aws_rds.db_instance_id
+
+  alarm_email = var.aws_alarm_email
+
+  tags = local.common_tags
+}
+
 resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
   name                       = "diag-app-arkcloud-web-${var.environment}"
   target_resource_id         = module.app_service_web.id

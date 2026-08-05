@@ -67,6 +67,12 @@ variable "ghcr_username" {
   default     = "epiph11"
 }
 
+variable "aws_alarm_email" {
+  description = "Optional — subscribes this address to the CloudWatch alarms SNS topic (task #37). AWS emails a confirmation link on apply that must be clicked before delivery starts. Left unset by default (no default value here, deliberately not hardcoded) so it stays out of version control; set via TF_VAR_aws_alarm_email or terraform.tfvars if wanted."
+  type        = string
+  default     = null
+}
+
 variable "ghcr_pat" {
   description = "GitHub PAT scoped to read:packages only, used solely so App Service can authenticate to ghcr.io — packages here are not guaranteed to stay public, and a real credential is more durable than depending on a visibility toggle. Never put a literal value here or in terraform.tfvars — supply via TF_VAR_ghcr_pat (local) or a CI secret (pipeline)."
   type        = string
