@@ -426,6 +426,28 @@ module "azure_cost_guard" {
   tags = local.common_tags
 }
 
+module "flow_logs" {
+  source = "../../modules/azure/flow-logs"
+
+  resource_group_name = module.resource_group.name
+  location             = var.location
+  name_prefix          = "arkcloud-${var.environment}"
+
+  api_nsg_id               = module.network.api_nsg_id
+  web_nsg_id               = module.network.web_nsg_id
+  database_nsg_id          = module.network.database_nsg_id
+  private_endpoint_nsg_id  = module.network.private_endpoint_nsg_id
+
+  # Off by default — see modules/azure/flow-logs' enable_traffic_analytics description for the
+  # cost tradeoff. Flip azure_enable_traffic_analytics to true once there's an actual reason to
+  # query this data rather than just retain it for incident forensics.
+  enable_traffic_analytics            = var.azure_enable_traffic_analytics
+  log_analytics_workspace_guid        = module.monitoring.log_analytics_workspace_guid
+  log_analytics_workspace_resource_id = module.monitoring.log_analytics_workspace_id
+
+  tags = local.common_tags
+}
+
 resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
   name                       = "diag-app-arkcloud-web-${var.environment}"
   target_resource_id         = module.app_service_web.id

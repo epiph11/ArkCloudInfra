@@ -85,6 +85,12 @@ variable "azure_budget_start_date" {
   default     = "2026-08-01T00:00:00Z"
 }
 
+variable "azure_enable_traffic_analytics" {
+  description = "Off by default — Traffic Analytics (modules/azure/flow-logs) makes NSG flow logs queryable in Log Analytics instead of raw JSON sitting in blob storage, but bills per GB processed on top of the flow logs themselves. Flip to true once there's an actual reason to query this data."
+  type        = bool
+  default     = false
+}
+
 variable "aws_alarm_email" {
   description = "Optional — subscribes this address to the CloudWatch alarms SNS topic (task #37). AWS emails a confirmation link on apply that must be clicked before delivery starts. Left unset by default (no default value here, deliberately not hardcoded) so it stays out of version control; set via TF_VAR_aws_alarm_email or terraform.tfvars if wanted."
   type        = string

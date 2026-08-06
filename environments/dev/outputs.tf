@@ -26,6 +26,10 @@ output "azure_cost_guard_budget_name" {
   value = module.azure_cost_guard.budget_name
 }
 
+output "azure_flow_logs_storage_account" {
+  value = module.flow_logs.storage_account_name
+}
+
 # --- AWS (Sprint 5) ---
 
 output "aws_vpc_id" {
