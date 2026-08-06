@@ -199,6 +199,18 @@ jobs:
       #     an audit log; recursively logging access to it is real compliance-tier hardening
       #     with no driving requirement yet, same "no compliance mandate yet" posture as the
       #     rest of this project's dev-tier skips.
+      #
+      # Cost-guard (Sprint 5, modules/azure/cost-guard) — 4 findings from a real Checkov run; 3
+      # fixed outright (CloudTrail S3 abort-incomplete-multipart-upload, both SNS topics'
+      # AWS-managed-key encryption — see modules/aws/cloudtrail/main.tf and
+      # modules/aws/monitoring/main.tf), 1 skipped below:
+      #   - CKV2_AZURE_24: Automation Account allows public network access — the cost-guard
+      #     runbook is triggered by an Azure Monitor Action Group calling the Automation
+      #     Account's webhook over its public HTTPS endpoint; disabling public network access
+      #     would require Automation Account Private Link (private endpoint + private DNS zone)
+      #     to keep that reachable, which is disproportionate infrastructure for a dev-tier
+      #     cost-saving automation. Same category as the other deferred network-hardening items
+      #     (Private Endpoints, NSG flow logs) — Sprint 6 candidate, not fixed here.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -216,7 +228,8 @@ jobs:
             CKV_AWS_150,CKV_AWS_91,CKV_AWS_2,CKV2_AWS_20,CKV_AWS_103,
             CKV_AWS_378,CKV_AWS_136,CKV_AWS_158,CKV_AWS_51,CKV_AWS_338,
             CKV2_AWS_28,
-            CKV_AWS_35,CKV_AWS_145,CKV_AWS_67,CKV2_AWS_62,CKV_AWS_144,CKV_AWS_18
+            CKV_AWS_35,CKV_AWS_145,CKV_AWS_67,CKV2_AWS_62,CKV_AWS_144,CKV_AWS_18,
+            CKV2_AZURE_24
 
       - name: terraform init
         run: terraform init

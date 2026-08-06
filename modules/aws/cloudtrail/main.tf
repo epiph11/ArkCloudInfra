@@ -67,6 +67,13 @@ resource "aws_s3_bucket_lifecycle_configuration" "trail" {
     expiration {
       days = 90
     }
+
+    # CKV_AWS_300 — without this, a failed/abandoned multipart upload (e.g. an interrupted
+    # CloudTrail log delivery) leaves orphaned parts billed as storage forever, since they're
+    # invisible to the object-level expiration rule above.
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -78,6 +85,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "trail" {
 resource "aws_sns_topic" "trail_notifications" {
   name = "arkcloud-cloudtrail-${var.name_prefix}"
   tags = var.tags
+
+  # CKV_AWS_26 — AWS-managed key (no extra KMS resource/cost), same "managed key is enough for
+  # dev" call already made for RDS/Secrets Manager/ECR/CloudWatch Logs elsewhere in this project.
+  kms_master_key_id = "alias/aws/sns"
 }
 
 data "aws_iam_policy_document" "trail_sns" {

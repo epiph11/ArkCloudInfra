@@ -1,6 +1,10 @@
 resource "aws_sns_topic" "alerts" {
   name = "arkcloud-alerts-${var.name_prefix}"
   tags = var.tags
+
+  # CKV_AWS_26 — AWS-managed key, same "managed key is enough for dev" call as the CloudTrail
+  # notifications topic (modules/aws/cloudtrail) and everything else in this project.
+  kms_master_key_id = "alias/aws/sns"
 }
 
 resource "aws_sns_topic_subscription" "email" {
