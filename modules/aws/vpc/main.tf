@@ -51,7 +51,7 @@ resource "aws_route_table" "public" {
 resource "aws_route" "public_internet" {
   route_table_id         = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
-  gateway_id              = aws_internet_gateway.this.id
+  gateway_id             = aws_internet_gateway.this.id
 }
 
 resource "aws_route_table_association" "public" {
@@ -96,7 +96,7 @@ resource "aws_route_table" "ecs" {
 resource "aws_route" "ecs_nat" {
   route_table_id         = aws_route_table.ecs.id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id          = aws_nat_gateway.this.id
+  nat_gateway_id         = aws_nat_gateway.this.id
 }
 
 resource "aws_route_table_association" "ecs" {
@@ -145,7 +145,7 @@ resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.this.id
   service_name      = "com.amazonaws.${data.aws_region.current.name}.s3"
   vpc_endpoint_type = "Gateway"
-  route_table_ids    = [aws_route_table.ecs.id, aws_route_table.public.id]
+  route_table_ids   = [aws_route_table.ecs.id, aws_route_table.public.id]
 
   tags = merge(var.tags, { Name = "vpce-s3-${var.name_prefix}" })
 }

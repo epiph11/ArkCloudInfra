@@ -23,7 +23,23 @@ resource "aws_sns_topic_subscription" "email" {
 resource "aws_cloudwatch_log_metric_filter" "api_errors" {
   name           = "arkcloud-${var.name_prefix}-api-errors"
   log_group_name = var.api_log_group_name
-  pattern        = "{ $.@l = \"Error\" || $.@l = \"Fatal\" }"
+  # NOT JSON property-selector syntax ($.['@l']) — that was tried and confirmed wrong via a live
+  # apply failure ("Invalid character(s) in term '$.['@'"), despite matching AWS's own bracket-
+  # notation example ($.['cluster.name']). Re-checked against the live AWS docs (Filter pattern
+  # syntax for metric filters, CloudWatch Logs): property selectors are documented as
+  # "alphanumeric strings that support hyphen and underscore characters" — bracket notation is
+  # only documented as a workaround for a PERIOD inside a property name (disambiguating it from
+  # the "$." path delimiter), not a general escape for arbitrary special characters. "@" was
+  # never a supported property-selector character, with or without brackets — Serilog's "@l"
+  # field is structurally unmatchable via JSON path syntax here, full stop.
+  #
+  # Fix: plain unstructured term matching instead of JSON path matching — no property selector
+  # involved, so the "@" restriction doesn't apply. Trade-off: matches the literal word "Error"/
+  # "Fatal" anywhere in the raw log line (e.g. inside a message string), not strictly the "@l"
+  # field's value — less precise than true JSON matching would be, but it actually works, and a
+  # false-positive alarm is a much smaller problem than a metric filter that silently never
+  # matches anything.
+  pattern = "?Error ?Fatal"
 
   metric_transformation {
     name          = "ApiErrorCount"
@@ -36,7 +52,8 @@ resource "aws_cloudwatch_log_metric_filter" "api_errors" {
 resource "aws_cloudwatch_log_metric_filter" "web_errors" {
   name           = "arkcloud-${var.name_prefix}-web-errors"
   log_group_name = var.web_log_group_name
-  pattern        = "{ $.@l = \"Error\" || $.@l = \"Fatal\" }"
+  # See api_errors above for why this isn't JSON property-selector syntax.
+  pattern = "?Error ?Fatal"
 
   metric_transformation {
     name          = "WebErrorCount"

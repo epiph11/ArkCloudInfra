@@ -18,6 +18,14 @@ output "resource_group_name" {
   value = module.resource_group.name
 }
 
+output "azure_cost_guard_runbook_name" {
+  value = module.azure_cost_guard.runbook_name
+}
+
+output "azure_cost_guard_budget_name" {
+  value = module.azure_cost_guard.budget_name
+}
+
 # --- AWS (Sprint 5) ---
 
 output "aws_vpc_id" {

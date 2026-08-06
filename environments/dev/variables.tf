@@ -67,6 +67,24 @@ variable "ghcr_username" {
   default     = "epiph11"
 }
 
+variable "azure_alarm_email" {
+  description = "Optional — receives the cost-guard's 80% warning and 100%/action-triggered notifications (see modules/azure/cost-guard). Left unset by default so it stays out of version control; set via TF_VAR_azure_alarm_email or terraform.tfvars if wanted."
+  type        = string
+  default     = null
+}
+
+variable "azure_budget_amount_eur" {
+  description = "Monthly EUR threshold scoped to the dev resource group — at 100% actual spend, the cost-guard runbook stops PostgreSQL Flexible Server automatically (modules/azure/cost-guard)."
+  type        = number
+  default     = 7
+}
+
+variable "azure_budget_start_date" {
+  description = "First day of a month, RFC3339 — Azure budgets require this to align to the Monthly time_grain and it's effectively immutable after creation. Update to the first of the current month before the first apply of this module."
+  type        = string
+  default     = "2026-08-01T00:00:00Z"
+}
+
 variable "aws_alarm_email" {
   description = "Optional — subscribes this address to the CloudWatch alarms SNS topic (task #37). AWS emails a confirmation link on apply that must be clicked before delivery starts. Left unset by default (no default value here, deliberately not hardcoded) so it stays out of version control; set via TF_VAR_aws_alarm_email or terraform.tfvars if wanted."
   type        = string

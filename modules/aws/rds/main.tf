@@ -47,11 +47,11 @@ resource "aws_db_instance" "this" {
   engine         = "postgres"
   engine_version = var.engine_version
 
-  instance_class         = var.instance_class
-  allocated_storage      = var.allocated_storage
-  max_allocated_storage  = var.max_allocated_storage
-  storage_type            = "gp3"
-  storage_encrypted       = true # KMS-encrypted at rest using the AWS-managed aws/rds key — no dedicated CMK for dev, same "managed key is enough" call as not standing up a separate Key Vault HSM tier on the Azure side.
+  instance_class        = var.instance_class
+  allocated_storage     = var.allocated_storage
+  max_allocated_storage = var.max_allocated_storage
+  storage_type          = "gp3"
+  storage_encrypted     = true # KMS-encrypted at rest using the AWS-managed aws/rds key — no dedicated CMK for dev, same "managed key is enough" call as not standing up a separate Key Vault HSM tier on the Azure side.
 
   db_name  = var.database_name
   username = var.master_username
@@ -66,8 +66,8 @@ resource "aws_db_instance" "this" {
   multi_az            = var.multi_az
 
   backup_retention_period = var.backup_retention_period
-  backup_window            = "03:00-04:00"
-  maintenance_window       = "sun:04:30-sun:05:30"
+  backup_window           = "03:00-04:00"
+  maintenance_window      = "sun:04:30-sun:05:30"
 
   auto_minor_version_upgrade = true
   copy_tags_to_snapshot      = true

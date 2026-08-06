@@ -388,13 +388,40 @@ module "aws_monitoring" {
   api_log_group_name = module.aws_ecs_service_api.log_group_name
   web_log_group_name = module.aws_ecs_service_web.log_group_name
 
-  alb_arn_suffix              = local.aws_alb_arn_suffix
-  api_target_group_arn_suffix = local.aws_api_tg_arn_suffix
-  web_target_group_arn_suffix = local.aws_web_tg_arn_suffix
+  alb_arn_suffix               = local.aws_alb_arn_suffix
+  api_target_group_arn_suffix  = local.aws_api_tg_arn_suffix
+  web_target_group_arn_suffix  = local.aws_web_tg_arn_suffix
 
   rds_instance_id = module.aws_rds.db_instance_id
 
   alarm_email = var.aws_alarm_email
+
+  tags = local.common_tags
+}
+
+# ---------------------------------------------------------------------------
+# Cost guard (Azure only, see docs/infra-roadmap.md Journal des décisions) — at
+# var.azure_budget_amount_eur/month actual spend on rg-arkcloud-${env}, stops PostgreSQL
+# automatically rather than "switching App Service to a cheaper tier": confirmé live que
+# Free/Shared tiers don't support the Regional VNet Integration the API app depends on to reach
+# Postgres privately, so Basic B1 is already the cheapest viable App Service tier — there's no
+# graceful cheaper fallback to switch to on that side.
+# ---------------------------------------------------------------------------
+
+module "azure_cost_guard" {
+  source = "../../modules/azure/cost-guard"
+
+  resource_group_name = module.resource_group.name
+  resource_group_id    = module.resource_group.id
+  location             = var.location
+  name_prefix          = "arkcloud-${var.environment}"
+
+  postgres_server_id   = module.postgresql.server_id
+  postgres_server_name = "psql-arkcloud-${var.environment}"
+
+  budget_amount_eur = var.azure_budget_amount_eur
+  budget_start_date = var.azure_budget_start_date
+  alert_email       = var.azure_alarm_email
 
   tags = local.common_tags
 }
