@@ -26,6 +26,15 @@ aws_postgres_instance_class = "db.t3.micro"
 # console/CLI either way.
 # aws_alarm_email = "you@example.com"
 
+# Optional (modules/azure/cost-guard) — 80% warning email + 100% action-triggered notification
+# for the Azure budget. Leave commented out to skip the 80% warning; the automatic PostgreSQL
+# stop at 100% still fires either way. azure_budget_amount_eur/azure_budget_start_date have
+# working defaults (7 EUR/month, first of the month you first apply this) — override only if
+# you want a different threshold or missed the first-of-month window.
+# azure_alarm_email      = "you@example.com"
+# azure_budget_amount_eur = 7
+# azure_budget_start_date = "2026-08-01T00:00:00Z"
+
 tags = {
   owner = "epiphane"
 }
