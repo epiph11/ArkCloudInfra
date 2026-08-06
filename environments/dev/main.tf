@@ -388,9 +388,9 @@ module "aws_monitoring" {
   api_log_group_name = module.aws_ecs_service_api.log_group_name
   web_log_group_name = module.aws_ecs_service_web.log_group_name
 
-  alb_arn_suffix               = local.aws_alb_arn_suffix
-  api_target_group_arn_suffix  = local.aws_api_tg_arn_suffix
-  web_target_group_arn_suffix  = local.aws_web_tg_arn_suffix
+  alb_arn_suffix              = local.aws_alb_arn_suffix
+  api_target_group_arn_suffix = local.aws_api_tg_arn_suffix
+  web_target_group_arn_suffix = local.aws_web_tg_arn_suffix
 
   rds_instance_id = module.aws_rds.db_instance_id
 
@@ -412,9 +412,9 @@ module "azure_cost_guard" {
   source = "../../modules/azure/cost-guard"
 
   resource_group_name = module.resource_group.name
-  resource_group_id    = module.resource_group.id
-  location             = var.location
-  name_prefix          = "arkcloud-${var.environment}"
+  resource_group_id   = module.resource_group.id
+  location            = var.location
+  name_prefix         = "arkcloud-${var.environment}"
 
   postgres_server_id   = module.postgresql.server_id
   postgres_server_name = "psql-arkcloud-${var.environment}"
