@@ -58,10 +58,14 @@ resource "azurerm_storage_account" "flow_logs" {
     }
   }
 
-  # SAS expiration policy (Checkov CKV2_AZURE_41) — nothing in this module issues a SAS today,
-  # but if the storage key is ever used to hand-generate one for a one-off investigation, this
-  # caps how long it stays valid instead of defaulting to "forever". "Log" (not "Block") so it
-  # can't break anything Network Watcher itself is doing to write flow logs.
+  # SAS expiration policy — nothing in this module issues a SAS today, but if the storage key is
+  # ever used to hand-generate one for a one-off investigation, this caps how long it stays valid
+  # instead of defaulting to "forever". "Log" (not "Block") so it can't break anything Network
+  # Watcher itself is doing to write flow logs.
+  #
+  # Still skipped as CKV2_AZURE_41 in terraform-ci.yml despite being present and correct: this
+  # exact block (matching Prisma Cloud's own remediation guide) still fails the check — a
+  # confirmed Checkov bug, not a config gap (github.com/bridgecrewio/checkov/issues/6140).
   sas_policy {
     expiration_action = "Log"
     expiration_period = "07.00:00:00"

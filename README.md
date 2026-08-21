@@ -451,9 +451,10 @@ Le premier vrai run de `terraform-ci.yml` a remonté 28 findings sur `environmen
 
 ### Sprint 6 — `modules/azure/flow-logs`, 10 findings
 
-Corrigés (`modules/azure/flow-logs/main.tf`/`variables.tf`) : soft delete sur le storage account (`CKV2_AZURE_38`), politique d'expiration SAS (`CKV2_AZURE_41`), rétention des flow logs relevée à 90 jours (`CKV_AZURE_12`) — les trois sont du config pur, sans compromis ni coût réel supplémentaire (stockage Standard LRS de JSON).
+Corrigés (`modules/azure/flow-logs/main.tf`/`variables.tf`) : soft delete sur le storage account (`CKV2_AZURE_38`), rétention des flow logs relevée à 90 jours (`CKV_AZURE_12`) — config pur, sans compromis ni coût réel supplémentaire (stockage Standard LRS de JSON).
 
 Écartés (`skip_check` dans `terraform-ci.yml`) :
+- **`CKV2_AZURE_41`** (pas de politique d'expiration SAS) — **bug Checkov confirmé, pas un vrai manque** : le bloc `sas_policy` est présent et suit la doc Prisma Cloud à la lettre, le check échoue quand même. Quelqu'un d'autre a rapporté exactement le même faux positif avec une syntaxe identique ([`bridgecrewio/checkov#6140`](https://github.com/bridgecrewio/checkov/issues/6140)), fermé sans correctif visible. À retirer du skip si une future version de Checkov corrige ça.
 - **`CKV_AZURE_59`/`CKV2_AZURE_33`** (accès public / pas de private endpoint) — même arbitrage que `CKV2_AZURE_24` : un private endpoint est une vraie brique d'infra disproportionnée pour un bucket de diagnostic en dev.
 - **`CKV2_AZURE_40`** (Shared Key non désactivée) — le seul chemin AAD-only de Network Watcher passe par une identité managée assignée par l'utilisateur, qu'`azurerm_network_watcher_flow_log` ne supporte pas encore dans le provider AzureRM (demande ouverte, `hashicorp/terraform-provider-azurerm#30219`) ; désactiver Shared Key casserait silencieusement l'écriture des flow logs.
 - **`CKV2_AZURE_1`** (pas de Customer Managed Key) — des métadonnées réseau (IP/port/allow-deny), pas les données sensibles que ce check vise ; une CMK impliquerait clé Key Vault + RBAC + identité pour un gain réel très faible.
