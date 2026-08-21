@@ -35,6 +35,7 @@ aws_postgres_instance_class = "db.t3.micro"
 # azure_budget_amount_eur = 7
 # azure_budget_start_date = "2026-08-01T00:00:00Z"
 
-tags = {
-  owner = "epiphane"
-}
+# "owner" tag is set in locals.tf now, not here — see that file's comment for why
+# (terraform.tfvars is gitignored, so the CI apply job never saw it, and kept resetting the tag
+# on every push). tags is still available for any other one-off extra tag you want merged on top.
+tags = {}
