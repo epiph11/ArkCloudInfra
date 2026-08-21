@@ -28,9 +28,9 @@ variable "vnet_id" {
 }
 
 variable "retention_days" {
-  description = "Dev-tier retention — matches the 30-day window already used for CloudWatch Logs (AWS side) and App Service diagnostic settings."
+  description = "90 days (Checkov CKV_AZURE_12's benchmark for NSG/VNet flow log retention) rather than the 30-day window used elsewhere (CloudWatch Logs, App Service diagnostics) — deliberately diverges because Standard LRS blob storage is cheap enough per GB that 3x the retention window is a rounding error in cost, unlike CloudWatch Logs Insights or Log Analytics ingestion, so there's no real tradeoff to make here."
   type        = number
-  default     = 30
+  default     = 90
 }
 
 variable "enable_traffic_analytics" {

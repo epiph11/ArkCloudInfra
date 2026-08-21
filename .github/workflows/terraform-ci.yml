@@ -211,6 +211,30 @@ jobs:
       #     to keep that reachable, which is disproportionate infrastructure for a dev-tier
       #     cost-saving automation. Same category as the other deferred network-hardening items
       #     (Private Endpoints, NSG flow logs) — Sprint 6 candidate, not fixed here.
+      #
+      # Flow logs (Sprint 6, modules/azure/flow-logs) — 10 findings from a real Checkov run; 3
+      # fixed outright (soft delete, SAS expiration policy, 90-day retention — see
+      # modules/azure/flow-logs/main.tf and variables.tf), 7 skipped below (full reasoning also
+      # in that module's header comment and README.md §9):
+      #   - CKV_AZURE_59 / CKV2_AZURE_33: storage account public network access / no private
+      #     endpoint — same Private Link tradeoff as CKV2_AZURE_24 above, disproportionate at
+      #     dev scale for a diagnostics-only bucket.
+      #   - CKV2_AZURE_40: Shared Key auth not disabled — Network Watcher's only AAD-only path is
+      #     a user-assigned managed identity, which azurerm_network_watcher_flow_log doesn't
+      #     support in the current provider (open request, terraform-provider-azurerm#30219);
+      #     disabling this would silently stop flow log delivery.
+      #   - CKV2_AZURE_1: no Customer Managed Key — flow logs are network metadata (source/dest
+      #     IP, port, allow/deny), not the kind of "critical data" this check is aimed at;
+      #     CMK here would mean a new Key Vault key + RBAC + identity wiring for no real gain.
+      #   - CKV_AZURE_206: replication is LRS not ZRS/GRS — deliberate, same reasoning as the
+      #     retention default (module main.tf comment): write-once forensic JSON, not
+      #     business-continuity data.
+      #   - CKV_AZURE_33: Storage Analytics logging for the Queue service — this account only
+      #     ever receives blobs, the Queue service isn't used at all.
+      #   - CKV_AZURE_43: storage account naming rules — false positive. Checkov can't statically
+      #     resolve the `replace()` call building the name across the module boundary; the real
+      #     applied name (`starkclouddevflow`, confirmed in `terraform apply` output) is 17
+      #     lowercase alphanumeric characters and already satisfies the rule.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -229,7 +253,9 @@ jobs:
             CKV_AWS_378,CKV_AWS_136,CKV_AWS_158,CKV_AWS_51,CKV_AWS_338,
             CKV2_AWS_28,
             CKV_AWS_35,CKV_AWS_145,CKV_AWS_67,CKV2_AWS_62,CKV_AWS_144,CKV_AWS_18,
-            CKV2_AZURE_24
+            CKV2_AZURE_24,
+            CKV_AZURE_59,CKV_AZURE_43,CKV_AZURE_206,CKV_AZURE_33,
+            CKV2_AZURE_1,CKV2_AZURE_33,CKV2_AZURE_40
 
       - name: terraform init
         run: terraform init

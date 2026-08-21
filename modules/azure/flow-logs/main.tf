@@ -18,6 +18,15 @@
 # the existing diagnostic settings (Key Vault access, PostgreSQL logs, App Service HTTP logs)
 # don't cover: none of them show *network-level* traffic that never reached the application
 # layer at all (e.g. a port-scan or a blocked connection attempt hitting an NSG deny rule).
+#
+# Checkov (first run against this module) — 3 fixed below (soft delete, SAS expiration policy,
+# 90-day retention), 7 skipped in terraform-ci.yml (README.md §9 has the full list): the two
+# recurring themes are (a) public network access / private endpoint — same tradeoff already made
+# for Key Vault and the cost-guard Automation Account, a private endpoint is real extra
+# infrastructure disproportionate at dev scale, and (b) disabling Shared Key auth, which would
+# silently break flow log delivery — Network Watcher only supports AAD-only storage access via a
+# user-assigned managed identity, and the azurerm provider has no argument for it yet on
+# azurerm_network_watcher_flow_log (open feature request, hashicorp/terraform-provider-azurerm#30219).
 # ---------------------------------------------------------------------------
 
 # Azure auto-creates exactly one Network Watcher per region per subscription, the first time a
@@ -31,14 +40,32 @@ data "azurerm_network_watcher" "this" {
 # Standard LRS — flow logs are write-once JSON blobs read only during an investigation, not a
 # performance-sensitive path; no reason to pay for a higher storage tier.
 resource "azurerm_storage_account" "flow_logs" {
-  name                 = "st${replace(var.name_prefix, "-", "")}flow"
-  resource_group_name  = var.resource_group_name
-  location             = var.location
-  account_tier         = "Standard"
+  name                     = "st${replace(var.name_prefix, "-", "")}flow"
+  resource_group_name      = var.resource_group_name
+  location                 = var.location
+  account_tier             = "Standard"
   account_replication_type = "LRS"
 
   min_tls_version                 = "TLS1_2"
   allow_nested_items_to_be_public = false
+
+  # Soft delete (Checkov CKV2_AZURE_38) — pure config, no cost beyond the retained blobs
+  # themselves, protects against an accidental delete (fat-fingered `az storage blob delete`,
+  # wrong-target Terraform destroy) during the retention window.
+  blob_properties {
+    delete_retention_policy {
+      days = 30
+    }
+  }
+
+  # SAS expiration policy (Checkov CKV2_AZURE_41) — nothing in this module issues a SAS today,
+  # but if the storage key is ever used to hand-generate one for a one-off investigation, this
+  # caps how long it stays valid instead of defaulting to "forever". "Log" (not "Block") so it
+  # can't break anything Network Watcher itself is doing to write flow logs.
+  sas_policy {
+    expiration_action = "Log"
+    expiration_period = "07.00:00:00"
+  }
 
   tags = var.tags
 }
@@ -50,8 +77,8 @@ resource "azurerm_network_watcher_flow_log" "vnet" {
 
   target_resource_id = var.vnet_id
   storage_account_id = azurerm_storage_account.flow_logs.id
-  enabled             = true
-  version             = 2
+  enabled            = true
+  version            = 2
 
   retention_policy {
     enabled = true

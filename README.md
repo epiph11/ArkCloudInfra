@@ -449,6 +449,18 @@ Le premier vrai run de `terraform-ci.yml` a remonté 28 findings sur `environmen
 - **`CKV_AZURE_13`** (Azure App Service Authentication / Easy Auth) — l'activer ferait doublon avec le système JWT propre à `ArkCloud.API` : deux couches d'authentification qui se marcheraient dessus, pas un vrai manque.
 - **`CKV_AZURE_88`** (App Service + Azure Files) — pensé pour des apps ayant besoin de stockage fichier persistant ; cette app est sans état, tout ce qui doit durer vit dans PostgreSQL.
 
+### Sprint 6 — `modules/azure/flow-logs`, 10 findings
+
+Corrigés (`modules/azure/flow-logs/main.tf`/`variables.tf`) : soft delete sur le storage account (`CKV2_AZURE_38`), politique d'expiration SAS (`CKV2_AZURE_41`), rétention des flow logs relevée à 90 jours (`CKV_AZURE_12`) — les trois sont du config pur, sans compromis ni coût réel supplémentaire (stockage Standard LRS de JSON).
+
+Écartés (`skip_check` dans `terraform-ci.yml`) :
+- **`CKV_AZURE_59`/`CKV2_AZURE_33`** (accès public / pas de private endpoint) — même arbitrage que `CKV2_AZURE_24` : un private endpoint est une vraie brique d'infra disproportionnée pour un bucket de diagnostic en dev.
+- **`CKV2_AZURE_40`** (Shared Key non désactivée) — le seul chemin AAD-only de Network Watcher passe par une identité managée assignée par l'utilisateur, qu'`azurerm_network_watcher_flow_log` ne supporte pas encore dans le provider AzureRM (demande ouverte, `hashicorp/terraform-provider-azurerm#30219`) ; désactiver Shared Key casserait silencieusement l'écriture des flow logs.
+- **`CKV2_AZURE_1`** (pas de Customer Managed Key) — des métadonnées réseau (IP/port/allow-deny), pas les données sensibles que ce check vise ; une CMK impliquerait clé Key Vault + RBAC + identité pour un gain réel très faible.
+- **`CKV_AZURE_206`** (réplication LRS) — délibéré : JSON de forensic écrit une fois, pas une donnée de continuité d'activité.
+- **`CKV_AZURE_33`** (logging du service Queue) — ce storage account ne sert jamais le service Queue, uniquement du blob.
+- **`CKV_AZURE_43`** (règles de nommage) — faux positif : Checkov ne résout pas statiquement le `replace()` qui construit le nom à travers la frontière du module ; le nom réellement appliqué (`starkclouddevflow`, confirmé dans la sortie de `terraform apply`) respecte déjà la règle.
+
 ---
 
 ## 10. Rotation des secrets — politique documentée (pas d'automatisation)
