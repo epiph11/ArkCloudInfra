@@ -22,20 +22,9 @@ variable "network_watcher_resource_group_name" {
   default = "NetworkWatcherRG"
 }
 
-variable "api_nsg_id" {
-  type = string
-}
-
-variable "web_nsg_id" {
-  type = string
-}
-
-variable "database_nsg_id" {
-  type = string
-}
-
-variable "private_endpoint_nsg_id" {
-  type = string
+variable "vnet_id" {
+  description = "Resource ID of the VNet to enable flow logging on (module.network.vnet_id). As of June 30 2025, Azure no longer supports creating flow logs scoped to a Network Security Group — Virtual Network Flow Logs (this) are the only currently-creatable option, and cover every subnet/NIC under the VNet in one resource rather than one per NSG."
+  type        = string
 }
 
 variable "retention_days" {

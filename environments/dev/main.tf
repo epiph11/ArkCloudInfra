@@ -430,13 +430,10 @@ module "flow_logs" {
   source = "../../modules/azure/flow-logs"
 
   resource_group_name = module.resource_group.name
-  location             = var.location
-  name_prefix          = "arkcloud-${var.environment}"
+  location            = var.location
+  name_prefix         = "arkcloud-${var.environment}"
 
-  api_nsg_id               = module.network.api_nsg_id
-  web_nsg_id               = module.network.web_nsg_id
-  database_nsg_id          = module.network.database_nsg_id
-  private_endpoint_nsg_id  = module.network.private_endpoint_nsg_id
+  vnet_id = module.network.vnet_id
 
   # Off by default — see modules/azure/flow-logs' enable_traffic_analytics description for the
   # cost tradeoff. Flip azure_enable_traffic_analytics to true once there's an actual reason to
