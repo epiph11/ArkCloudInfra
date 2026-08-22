@@ -164,11 +164,21 @@ jobs:
       #   - CKV_AWS_91: ALB access logging — needs an S3 bucket + delivery policy, real infra
       #     not a flag flip. Deferred to Step 15 (Monitoring AWS), where the actual logging
       #     destinations get built rather than bolted onto the ALB module in isolation.
-      #   - CKV_AWS_2, CKV2_AWS_20, CKV_AWS_103, CKV_AWS_378: HTTPS listener, HTTP->HTTPS
-      #     redirect, TLS 1.2, target-group-not-HTTP — all four blocked by the same real
-      #     dependency: no custom domain exists yet on either cloud, so there's no ACM cert to
-      #     attach. Symmetric limitation with Azure, which also has no custom domain/TLS beyond
-      #     the platform default *.azurewebsites.net. Sprint 6 hardening once a domain exists.
+      #   - CKV_AWS_2, CKV2_AWS_20, CKV_AWS_103: fixed (Sprint 6, modules/aws/alb) — HTTPS
+      #     listener + HTTP->HTTPS redirect + TLS 1.2 minimum policy, using a self-signed
+      #     certificate (tls_private_key/tls_self_signed_cert, imported into ACM) since no real
+      #     domain exists yet for a trusted DNS-validated one — see that module's header comment
+      #     for the full tradeoff (browsers will show a cert warning; acceptable for dev-only
+      #     traffic). ArkCloud.Blazor's HttpClients were updated to trust that one specific host
+      #     (Api__TrustSelfSignedCert, see ArkCloud/frontend/ArkCloud.Blazor/Program.cs) since
+      #     the default TLS validation would otherwise reject every server-to-server API call.
+      #   - CKV_AWS_378: target group protocol is still HTTP — this is TLS offloading at the ALB
+      #     (terminate HTTPS at the listener, plain HTTP to the Fargate targets over the private
+      #     VPC network), the standard and secure pattern for this architecture, not a gap;
+      #     Checkov has a known false-positive report for exactly this case
+      #     (bridgecrewio/checkov#6754). Re-encrypting ALB-to-target would need TLS certs
+      #     terminated inside each container — disproportionate for traffic that never leaves
+      #     the VPC.
       #   - CKV_AWS_136, CKV_AWS_158: ECR / CloudWatch Log Group KMS CMK — default AWS-managed
       #     key, same "managed key is enough for dev" call already made for RDS storage
       #     encryption and the Secrets Manager containers (CKV_AWS_149 above).
@@ -255,7 +265,7 @@ jobs:
             CKV_AWS_260,CKV_AWS_382,CKV2_AWS_5,CKV2_AWS_11,
             CKV_AWS_157,CKV_AWS_353,CKV_AWS_118,CKV_AWS_293,CKV_AWS_354,
             CKV_AWS_149,CKV2_AWS_57,
-            CKV_AWS_150,CKV_AWS_91,CKV_AWS_2,CKV2_AWS_20,CKV_AWS_103,
+            CKV_AWS_150,CKV_AWS_91,
             CKV_AWS_378,CKV_AWS_136,CKV_AWS_158,CKV_AWS_51,CKV_AWS_338,
             CKV2_AWS_28,
             CKV_AWS_35,CKV_AWS_145,CKV_AWS_67,CKV2_AWS_62,CKV_AWS_144,CKV_AWS_18,

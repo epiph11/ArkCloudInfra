@@ -462,6 +462,14 @@ Corrigés (`modules/azure/flow-logs/main.tf`/`variables.tf`) : soft delete sur l
 - **`CKV_AZURE_33`** (logging du service Queue) — ce storage account ne sert jamais le service Queue, uniquement du blob.
 - **`CKV_AZURE_43`** (règles de nommage) — faux positif : Checkov ne résout pas statiquement le `replace()` qui construit le nom à travers la frontière du module ; le nom réellement appliqué (`starkclouddevflow`, confirmé dans la sortie de `terraform apply`) respecte déjà la règle.
 
+### Sprint 6 — HTTPS sur l'ALB AWS (certificat auto-signé)
+
+Corrigés (`modules/aws/alb/main.tf`) : `CKV_AWS_2` (listener HTTPS), `CKV2_AWS_20` (redirect HTTP→HTTPS), `CKV_AWS_103` (politique TLS 1.2 minimum). Pas de domaine réel pour ce projet → pas de certificat ACM validé par DNS possible → certificat auto-signé généré par Terraform (`tls_private_key`/`tls_self_signed_cert`) importé dans ACM. Chiffre bien le trafic navigateur↔ALB, mais sans chaîne de confiance : le navigateur affiche un avertissement. Acceptable en dev (trafic health-check/tests, pas d'utilisateurs réels) ; à remplacer par un vrai certificat DNS-validé dès qu'un domaine existe — les ressources ne changent pas de forme, juste la source du certificat.
+
+Effet de bord traité : `ArkCloud.Blazor` appelle l'API via l'ALB en HTTPS maintenant ; sans rien faire, la validation TLS par défaut du `HttpClient` aurait rejeté chaque appel serveur-à-serveur (personne ne garantit la chaîne d'un certificat auto-signé). Fix côté application (`ArkCloud/frontend/ArkCloud.Blazor/Program.cs`) : un contournement de validation scopé strictement à l'host de l'API configuré, actif uniquement si `Api:TrustSelfSignedCert=true` (mis à `true` uniquement côté AWS dans `environments/dev/main.tf` — Azure ne le définit jamais, son certificat `*.azurewebsites.net` est un vrai certificat Microsoft).
+
+Écarté : **`CKV_AWS_378`** (target group en HTTP) — c'est du TLS offloading délibéré : HTTPS se termine à l'ALB, le trafic vers les tasks Fargate reste en HTTP sur le réseau VPC privé — le pattern standard et sûr pour cette architecture, pas un vrai manque. Faux positif documenté par Checkov lui-même sur exactement ce cas (`bridgecrewio/checkov#6754`). Re-chiffrer ALB→target demanderait un certificat TLS terminé dans chaque conteneur — disproportionné pour du trafic qui ne sort jamais du VPC.
+
 ---
 
 ## 10. Rotation des secrets — politique documentée (pas d'automatisation)

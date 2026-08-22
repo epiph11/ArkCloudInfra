@@ -350,9 +350,17 @@ module "aws_ecs_service_web" {
 
   # Blazor never touches the DB/JWT secrets directly (mirrors Azure's app_service_web having
   # no Key Vault role assignment) — no `secrets` block needed here.
+  #
+  # Api__BaseUrl is https:// as of Sprint 6 (modules/aws/alb's self-signed ACM cert) — port 80
+  # now only redirects, it doesn't forward. Api__TrustSelfSignedCert=true tells
+  # ArkCloud.Blazor's Program.cs to skip TLS chain validation for calls to this exact host only
+  # (see that file's comment) — required because nothing vouches for a self-signed cert's chain,
+  # and the default HttpClient would otherwise reject every API call. Remove this setting the
+  # moment a real domain + trusted ACM cert exists for the ALB.
   environment = {
-    ASPNETCORE_ENVIRONMENT = "Production"
-    Api__BaseUrl           = "http://${module.aws_alb.alb_dns_name}/api"
+    ASPNETCORE_ENVIRONMENT   = "Production"
+    Api__BaseUrl             = "https://${module.aws_alb.alb_dns_name}/api"
+    Api__TrustSelfSignedCert = "true"
   }
 
   tags = local.common_tags

@@ -18,5 +18,12 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    # Sprint 6 — generates the self-signed cert for the ALB's HTTPS listener (modules/aws/alb).
+    # No real domain exists yet to get a trusted ACM cert validated against; see that module's
+    # header comment for the full reasoning.
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 }
