@@ -434,6 +434,61 @@ module "azure_cost_guard" {
   tags = local.common_tags
 }
 
+# AWS counterpart to module.azure_secret_rotation below — same 90-day policy, different
+# mechanism (Secrets Manager rotation + custom Lambda vs. Automation Runbook + schedule).
+# Requires the Lambda package to be built first: see modules/aws/secret-rotation/lambda/README.md.
+module "aws_secret_rotation" {
+  source = "../../modules/aws/secret-rotation"
+
+  name_prefix = "arkcloud-${var.environment}"
+
+  secret_arn = module.aws_secrets.postgres_secret_arn
+
+  db_instance_identifier = module.aws_rds.db_instance_identifier
+  db_instance_arn        = module.aws_rds.arn
+  db_host                = module.aws_rds.address
+  db_port                = module.aws_rds.port
+  db_name                = module.aws_rds.database_name
+  db_username            = module.aws_rds.master_username
+
+  ecs_cluster_name = module.aws_ecs.cluster_name
+  ecs_service_name = module.aws_ecs_service_api.service_name
+  ecs_service_arn  = module.aws_ecs_service_api.service_arn
+
+  vpc_id                     = module.aws_vpc.vpc_id
+  vpc_subnet_ids             = module.aws_vpc.ecs_subnet_ids
+  database_security_group_id = module.aws_security.database_security_group_id
+
+  rotation_interval_days = var.aws_rotation_interval_days
+
+  tags = local.common_tags
+}
+
+module "azure_secret_rotation" {
+  source = "../../modules/azure/secret-rotation"
+
+  resource_group_name = module.resource_group.name
+  location            = var.location
+  name_prefix         = "arkcloud-${var.environment}"
+
+  postgres_server_id      = module.postgresql.server_id
+  postgres_server_name    = module.postgresql.server_name
+  postgres_server_fqdn    = module.postgresql.fqdn
+  postgres_admin_username = module.postgresql.administrator_login
+  postgres_database_name  = module.postgresql.database_name
+
+  key_vault_id   = module.key_vault.id
+  key_vault_name = module.key_vault.name
+
+  app_service_id   = module.app_service_api.id
+  app_service_name = module.app_service_api.name
+
+  rotation_interval_days = var.azure_rotation_interval_days
+  rotation_start_time    = var.azure_rotation_start_time
+
+  tags = local.common_tags
+}
+
 module "flow_logs" {
   source = "../../modules/azure/flow-logs"
 

@@ -15,6 +15,12 @@ override.tf.json
 terraform.rc
 .terraform.lock.hcl
 
+# Lambda deployment packages — build artefacts, rebuilt from source by the documented build
+# command (see modules/aws/secret-rotation/lambda/README.md). Contains vendored binary wheels
+# (psycopg2) that are platform-specific and several MB; committing them would bloat history for
+# something reproducible in one command.
+modules/aws/*/lambda/build/
+
 # Never commit real credentials
 *.pem
 *.key

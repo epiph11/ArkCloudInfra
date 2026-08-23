@@ -30,6 +30,18 @@ output "azure_flow_logs_storage_account" {
   value = module.flow_logs.storage_account_name
 }
 
+output "aws_secret_rotation_lambda_name" {
+  value = module.aws_secret_rotation.lambda_function_name
+}
+
+output "azure_secret_rotation_runbook_name" {
+  value = module.azure_secret_rotation.runbook_name
+}
+
+output "azure_secret_rotation_automation_account" {
+  value = module.azure_secret_rotation.automation_account_name
+}
+
 # --- AWS (Sprint 5) ---
 
 output "aws_vpc_id" {

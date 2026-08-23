@@ -91,6 +91,24 @@ variable "azure_enable_traffic_analytics" {
   default     = false
 }
 
+variable "aws_rotation_interval_days" {
+  description = "How often the RDS PostgreSQL password rotates automatically (modules/aws/secret-rotation). Kept equal to azure_rotation_interval_days on purpose — one rotation policy across both clouds, not two that drift apart."
+  type        = number
+  default     = 90
+}
+
+variable "azure_rotation_interval_days" {
+  description = "How often the PostgreSQL admin password rotates automatically (modules/azure/secret-rotation). 90 days is the common enterprise baseline; the AWS side uses the same interval via Secrets Manager's native rotation."
+  type        = number
+  default     = 90
+}
+
+variable "azure_rotation_start_time" {
+  description = "RFC3339 UTC timestamp for the first scheduled rotation. Azure rejects a start time less than ~5 minutes in the future, so this must be bumped to a future date if the first apply happens after it has passed. Pick an off-peak hour: each rotation briefly restarts the API App Service."
+  type        = string
+  default     = "2026-09-01T03:00:00Z"
+}
+
 variable "aws_alarm_email" {
   description = "Optional — subscribes this address to the CloudWatch alarms SNS topic (task #37). AWS emails a confirmation link on apply that must be clicked before delivery starts. Left unset by default (no default value here, deliberately not hardcoded) so it stays out of version control; set via TF_VAR_aws_alarm_email or terraform.tfvars if wanted."
   type        = string
