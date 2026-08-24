@@ -22,38 +22,15 @@ locals {
   lambda_zip = coalesce(var.lambda_zip_path, "${path.module}/lambda/build/rotate.zip")
 }
 
-# Its own security group rather than reusing sg-ecs-api: the ingress rule added to sg-database
-# below should name exactly this Lambda, so the database's allowed-source list stays a precise
-# statement of who can reach it.
-resource "aws_security_group" "rotation" {
-  name        = "secret-rotation-${var.name_prefix}"
-  description = "Postgres password rotation Lambda - egress to RDS and AWS APIs, no ingress."
-  vpc_id      = var.vpc_id
-
-  # No ingress block at all — nothing ever connects TO a rotation Lambda.
-
-  egress {
-    description = "All outbound - RDS on the private subnets, Secrets Manager/RDS/ECS APIs via NAT"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(var.tags, { Name = "sg-secret-rotation-${var.name_prefix}" })
-}
-
-# The testSecret step connects to the database for real to prove the new credential works before
-# it's promoted — so sg-database has to accept this Lambda as a source.
-resource "aws_vpc_security_group_ingress_rule" "database_from_rotation" {
-  security_group_id            = var.database_security_group_id
-  description                  = "Postgres rotation Lambda (testSecret step)"
-  referenced_security_group_id = aws_security_group.rotation.id
-  from_port                    = var.db_port
-  to_port                      = var.db_port
-  ip_protocol                  = "tcp"
-}
-
+# This module deliberately does NOT create the Lambda's security group or its sg-database
+# ingress rule — both live in modules/aws/security instead, and the SG id is passed in.
+#
+# The reason is a real failure, not tidiness: sg-database uses inline `ingress` blocks, and the
+# AWS provider treats inline rules as the complete authoritative set for a security group. A
+# standalone aws_vpc_security_group_ingress_rule pointing at the same SG gets deleted on every
+# apply, then recreated on the next refresh — and while it's missing, this Lambda has no route
+# to RDS. That flip-flop is what produced the "timeout expired" failure seen during rotation
+# testing (a missing SG rule times out rather than being refused, so it looks like slowness).
 data "aws_iam_policy_document" "lambda_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -149,9 +126,25 @@ resource "aws_lambda_function" "rotation" {
   # killed setSecret mid-wait.)
   timeout = 600
 
+  # No reserved_concurrent_executions (Checkov CKV_AWS_115, skipped in terraform-ci.yml) —
+  # not a choice, an account limit. Setting it to even 2 fails at apply time:
+  #   InvalidParameterValueException: Specified ReservedConcurrentExecutions for function
+  #   decreases account's UnreservedConcurrentExecution below its minimum value of [10].
+  # This account's total Lambda concurrency quota is at the default floor for a new account, and
+  # AWS refuses any reservation that would drop the unreserved pool under 10. Revisit once a
+  # concurrency quota increase is requested — the check is reasonable, it just isn't satisfiable
+  # here today.
+  # X-Ray (Checkov CKV_AWS_50) — genuinely useful here rather than box-ticking: this function
+  # spans RDS, Secrets Manager, ECS and a database connection, and the two bugs found during
+  # its first runs were both about *when* things happened relative to each other. Traces make
+  # that visible instead of inferred from log timestamps.
+  tracing_config {
+    mode = "Active"
+  }
+
   vpc_config {
     subnet_ids         = var.vpc_subnet_ids
-    security_group_ids = [aws_security_group.rotation.id]
+    security_group_ids = [var.security_group_id]
   }
 
   environment {
@@ -182,6 +175,41 @@ resource "aws_lambda_permission" "secretsmanager" {
   function_name = aws_lambda_function.rotation.function_name
   principal     = "secretsmanager.amazonaws.com"
   source_arn    = var.secret_arn
+}
+
+# A failed rotation is silent by default: Secrets Manager retries, gives up, and leaves the
+# secret on its old (still valid) version — the app keeps working, so nothing surfaces until
+# someone happens to look. This alarm is what makes the failure visible.
+#
+# Deliberately chosen over the Lambda DLQ that Checkov asks for (CKV_AWS_116, skipped in
+# terraform-ci.yml): Secrets Manager does invoke this function asynchronously, so a DLQ is
+# technically applicable — but it would only accumulate event payloads nobody reads. Knowing
+# rotation broke is the actual requirement, and that's an alarm, not a queue.
+resource "aws_cloudwatch_metric_alarm" "rotation_errors" {
+  count = var.alarm_sns_topic_arn != null ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-secret-rotation-errors"
+  alarm_description = "The Postgres password rotation Lambda failed. The secret stays on its previous version (the app keeps working), but the password has NOT rotated - check /aws/lambda/secret-rotation-${var.name_prefix}."
+
+  namespace   = "AWS/Lambda"
+  metric_name = "Errors"
+  dimensions = {
+    FunctionName = aws_lambda_function.rotation.function_name
+  }
+
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  # Rotation runs every 90 days, so the metric is absent almost all the time — treating missing
+  # data as "not breaching" avoids an alarm that sits in INSUFFICIENT_DATA permanently.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = var.tags
 }
 
 resource "aws_secretsmanager_secret_rotation" "postgres" {

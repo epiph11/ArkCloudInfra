@@ -203,6 +203,24 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_api" {
   enabled_metric {
     category = "AllMetrics"
   }
+
+  # Dérive perpétuelle, tracée jusqu'à sa cause plutôt que subie : l'API Azure ne renvoie pas
+  # log_analytics_destination_type pour Microsoft.Web/sites, donc Terraform le voit toujours
+  # absent et veut le reposer — à chaque plan, indéfiniment, sans jamais converger (défaut connu
+  # du provider, hashicorp/terraform-provider-azurerm#17172).
+  #
+  # Le réglage EST bien appliqué côté Azure : vérifié au Sprint 4 par requête KQL réelle, les
+  # tables dédiées (AppServiceHTTPLogs, AppServiceConsoleLogs) reçoivent des lignes — ce qui
+  # n'était pas le cas en mode legacy. C'est donc l'API qui ne le rapporte pas, pas le réglage
+  # qui manque. Le contournement souvent conseillé (retirer l'attribut) serait ici une
+  # régression : il ramènerait le mode legacy dont on sait qu'il ne remonte rien.
+  #
+  # ignore_changes plutôt que subir : un plan qui n'est jamais vide perd sa valeur de signal —
+  # on ne distingue plus une dérive attendue d'un vrai changement non désiré. C'est précisément
+  # ce que le Step 18.7 (fitness functions) exige de préserver.
+  lifecycle {
+    ignore_changes = [log_analytics_destination_type]
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -455,11 +473,17 @@ module "aws_secret_rotation" {
   ecs_service_name = module.aws_ecs_service_api.service_name
   ecs_service_arn  = module.aws_ecs_service_api.service_arn
 
-  vpc_id                     = module.aws_vpc.vpc_id
-  vpc_subnet_ids             = module.aws_vpc.ecs_subnet_ids
-  database_security_group_id = module.aws_security.database_security_group_id
+  vpc_subnet_ids = module.aws_vpc.ecs_subnet_ids
+
+  # SG created in module.aws_security alongside sg-database, not inside the rotation module —
+  # see that module's comment: inline and standalone security group rules can't coexist.
+  security_group_id = module.aws_security.secret_rotation_security_group_id
 
   rotation_interval_days = var.aws_rotation_interval_days
+
+  # Reuses the existing alerts topic rather than creating a second notification path — a failed
+  # rotation lands in the same inbox as the CloudWatch alarms already configured.
+  alarm_sns_topic_arn = module.aws_monitoring.sns_topic_arn
 
   tags = local.common_tags
 }
@@ -522,5 +546,10 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
 
   enabled_metric {
     category = "AllMetrics"
+  }
+
+  # Même dérive perpétuelle que app_service_api — voir le commentaire détaillé là-haut.
+  lifecycle {
+    ignore_changes = [log_analytics_destination_type]
   }
 }

@@ -251,6 +251,29 @@ jobs:
       #     resolve the `replace()` call building the name across the module boundary; the real
       #     applied name (`starkclouddevflow`, confirmed in `terraform apply` output) is 17
       #     lowercase alphanumeric characters and already satisfies the rule.
+      # Rotation Lambda (Sprint 6, modules/aws/secret-rotation) — 5 findings from a real Checkov
+      # run; 1 fixed outright (X-Ray tracing), 4 skipped below:
+      #   - CKV_AWS_115: no function-level concurrency limit. Attempted and rejected by AWS at
+      #     apply time, not a preference: "Specified ReservedConcurrentExecutions for function
+      #     decreases account's UnreservedConcurrentExecution below its minimum value of [10]".
+      #     This account sits at the default Lambda concurrency quota, so any reservation drops
+      #     the unreserved pool below AWS's own floor. Revisit after a quota increase.
+      #   - CKV_AWS_116: no Lambda DLQ. Secrets Manager does invoke rotation functions
+      #     asynchronously (verified against AWS docs, not assumed), so a DLQ is technically
+      #     applicable — but it would only accumulate event payloads nobody reads. The actual
+      #     requirement is *knowing* a rotation failed, which is a CloudWatch alarm on the
+      #     function's Errors metric wired to the existing alerts topic. Built instead of the
+      #     DLQ, see aws_cloudwatch_metric_alarm.rotation_errors in that module.
+      #   - CKV_AWS_173: Lambda env vars not encrypted with a customer-managed KMS key. They're
+      #     already encrypted at rest with an AWS-managed key, and none of these variables are
+      #     secret in the first place (DB host/name/username, ECS cluster and service names —
+      #     the password only ever exists inside Secrets Manager and the function's memory).
+      #     Same "AWS-managed key is enough for dev" call as CKV_AWS_136/158/149 above.
+      #   - CKV_AWS_272: no code-signing validation. Requires an AWS Signer signing profile and
+      #     configuration — real supply-chain infrastructure, and meaningful only once the
+      #     package is built by a trusted pipeline rather than by the documented local build
+      #     command (modules/aws/secret-rotation/lambda/README.md). Revisit if Lambda packaging
+      #     moves into CI.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -271,7 +294,8 @@ jobs:
             CKV_AWS_35,CKV_AWS_145,CKV_AWS_67,CKV2_AWS_62,CKV_AWS_144,CKV_AWS_18,
             CKV2_AZURE_24,
             CKV_AZURE_59,CKV_AZURE_43,CKV_AZURE_206,CKV_AZURE_33,
-            CKV2_AZURE_1,CKV2_AZURE_33,CKV2_AZURE_40,CKV2_AZURE_41
+            CKV2_AZURE_1,CKV2_AZURE_33,CKV2_AZURE_40,CKV2_AZURE_41,
+            CKV_AWS_115,CKV_AWS_116,CKV_AWS_173,CKV_AWS_272
 
       - name: terraform init
         run: terraform init

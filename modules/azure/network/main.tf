@@ -53,11 +53,19 @@ resource "azurerm_subnet" "database" {
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.database_subnet_prefix]
 
+  # "join/action", pas le générique "action" utilisé pour Microsoft.Web/serverFarms plus haut :
+  # c'est la valeur que Microsoft documente pour la délégation PostgreSQL Flexible Server, et
+  # surtout celle que le service impose lui-même en s'injectant dans le subnet.
+  #
+  # Diagnostic établi à partir d'une observation, pas d'une supposition : les trois subnets
+  # portaient la même valeur générique, mais seul celui-ci apparaissait en dérive à chaque plan —
+  # appliqué, puis revenu, indéfiniment. Azure réécrivait la valeur derrière Terraform, qui la
+  # remettait au plan suivant. La config était fausse, la dérive n'était que le symptôme.
   delegation {
     name = "postgresql-delegation"
     service_delegation {
       name    = "Microsoft.DBforPostgreSQL/flexibleServers"
-      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
     }
   }
 }

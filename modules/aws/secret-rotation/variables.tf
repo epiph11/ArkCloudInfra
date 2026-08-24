@@ -56,13 +56,9 @@ variable "vpc_subnet_ids" {
   type        = list(string)
 }
 
-variable "database_security_group_id" {
-  description = "sg-database — a rule is added to it allowing this Lambda's own security group in on the Postgres port, so the testSecret step can actually connect."
+variable "security_group_id" {
+  description = "The rotation Lambda's security group, created in modules/aws/security (not here) so that its sg-database ingress can be an inline rule — mixing inline and standalone rules on the same security group makes the AWS provider delete the standalone one on every apply. See this module's main.tf header for the failure that caused."
   type        = string
-}
-
-variable "vpc_id" {
-  type = string
 }
 
 variable "rotation_interval_days" {
@@ -73,6 +69,12 @@ variable "rotation_interval_days" {
 
 variable "lambda_zip_path" {
   description = "Path to the built deployment package (see this module's lambda/README.md — the package has to be built once because it vendors psycopg2, which the Lambda Python runtime doesn't include). Defaults to the build output location the build script writes to."
+  type        = string
+  default     = null
+}
+
+variable "alarm_sns_topic_arn" {
+  description = "Existing alerts topic (modules/aws/monitoring) notified when a rotation fails. Optional — leave null to skip the alarm, but then a failed rotation is silent: Secrets Manager keeps the old working password, so nothing breaks visibly and the rotation quietly stops happening."
   type        = string
   default     = null
 }

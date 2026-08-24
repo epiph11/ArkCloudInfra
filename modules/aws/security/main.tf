@@ -97,8 +97,42 @@ resource "aws_security_group" "ecs_web" {
   tags = merge(var.tags, { Name = "sg-ecs-web-${var.name_prefix}" })
 }
 
+# Lives here rather than in modules/aws/secret-rotation, where it logically belongs, for a
+# concrete reason: sg-database below uses inline `ingress` blocks, and the AWS provider treats
+# inline rules as the complete authoritative set for a security group — any rule defined as a
+# separate aws_vpc_security_group_ingress_rule elsewhere gets deleted on the next apply.
+#
+# That is not theoretical. The rotation Lambda's ingress rule was originally a separate resource
+# in its own module, and it silently vanished twice: every apply removed it, the following
+# refresh noticed and recreated it, and in between the Lambda had no path to RDS — which is what
+# actually caused the "timeout expired" failure during rotation testing.
+#
+# Keeping the Lambda's SG here means its ingress can be inline too, so the two can't fight.
+resource "aws_security_group" "secret_rotation" {
+  name        = "secret-rotation-${var.name_prefix}"
+  description = "Postgres password rotation Lambda - egress to RDS and AWS APIs, no ingress."
+  vpc_id      = var.vpc_id
+
+  # No ingress block at all — nothing ever connects TO a rotation Lambda.
+
+  egress {
+    description = "All outbound - RDS on the private subnets, Secrets Manager/RDS/ECS APIs via NAT"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, { Name = "sg-secret-rotation-${var.name_prefix}" })
+}
+
 resource "aws_security_group" "database" {
-  name        = "database-${var.name_prefix}"
+  name = "database-${var.name_prefix}"
+  # Description deliberately left as-is even though the rotation Lambda is now also an allowed
+  # source: security group descriptions are immutable in AWS, so editing this one forces
+  # Terraform to destroy and recreate the security group — detaching it from a live RDS instance
+  # in the process. Caught in a plan before applying; not worth a database outage to reword a
+  # sentence. The ingress blocks below are the authoritative statement of who can connect.
   description = "RDS PostgreSQL - ingress from sg-ecs-api only. sg-ecs-web is never listed here on purpose."
   vpc_id      = var.vpc_id
 
@@ -108,6 +142,17 @@ resource "aws_security_group" "database" {
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.ecs_api.id]
+  }
+
+  # The rotation Lambda's testSecret step connects for real to prove the new credential works
+  # before promoting it (see modules/aws/secret-rotation/lambda/rotate.py) — so it needs to be
+  # an allowed source. Inline here, deliberately: see the comment on sg-secret-rotation above.
+  ingress {
+    description     = "PostgreSQL from the password rotation Lambda (testSecret step)"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.secret_rotation.id]
   }
 
   # No egress rule at all — RDS doesn't initiate outbound connections, nothing to allow.

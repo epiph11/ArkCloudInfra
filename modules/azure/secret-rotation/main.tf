@@ -111,20 +111,55 @@ resource "azurerm_automation_runbook" "rotate_postgres_password" {
       throw "Password update failed with HTTP $($response.StatusCode): $($response.Content)"
     }
 
-    Write-Output "Password update accepted (HTTP $($response.StatusCode)). Waiting for the server to report Ready."
+    Write-Output "Password update accepted (HTTP $($response.StatusCode)). Confirming it has actually been applied."
 
-    # Bounded poll — a stuck server should fail the job loudly rather than hang until Azure's
-    # own 3-hour runbook limit kills it with no useful message.
+    # The Azure REST call is asynchronous: a 202 means "accepted", not "done". Polling for
+    # state=Ready alone is NOT sufficient, because immediately after the PATCH the server is
+    # still Ready (it hasn't started applying anything yet) — the loop would exit on the first
+    # check having verified nothing. The AWS side hit exactly this class of bug and failed with
+    # "password authentication failed" on the very next step.
+    #
+    # So instead of trusting the server's own state field, verify the outcome directly: poll the
+    # long-running-operation URL Azure returns in Azure-AsyncOperation (or Location), which
+    # reports Succeeded/Failed for THIS specific change.
+    $asyncUri = $response.Headers | Where-Object { $_.Key -eq "Azure-AsyncOperation" } | Select-Object -First 1 -ExpandProperty Value
+    if (-not $asyncUri) {
+      $asyncUri = $response.Headers | Where-Object { $_.Key -eq "Location" } | Select-Object -First 1 -ExpandProperty Value
+    }
+
     $deadline = (Get-Date).AddMinutes(15)
-    do {
-      Start-Sleep -Seconds 15
-      $check = Invoke-AzRestMethod -Method GET -Uri $serverUri
-      $state = ($check.Content | ConvertFrom-Json).properties.state
-      Write-Output "  server state: $state"
-      if ((Get-Date) -gt $deadline) {
-        throw "Server did not return to Ready within 15 minutes (last state: $state). The password may or may not have been applied - check the server before re-running."
-      }
-    } while ($state -ne "Ready")
+
+    if ($asyncUri) {
+      do {
+        Start-Sleep -Seconds 15
+        $op = Invoke-AzRestMethod -Method GET -Uri $asyncUri
+        $opStatus = ($op.Content | ConvertFrom-Json).status
+        Write-Output "  operation status: $opStatus"
+
+        if ($opStatus -eq "Failed" -or $opStatus -eq "Canceled") {
+          throw "Password update operation reported '$opStatus'. Nothing has been written to Key Vault - the old password is still the live one. Details: $($op.Content)"
+        }
+        if ((Get-Date) -gt $deadline) {
+          throw "Password update did not complete within 15 minutes (last status: $opStatus). Not writing to Key Vault - check the server state before re-running."
+        }
+      } while ($opStatus -ne "Succeeded")
+    }
+    else {
+      # No async header returned — fall back to watching the server leave and re-enter Ready,
+      # with a fixed initial delay so a still-unstarted update can't be mistaken for a finished
+      # one. Less precise than the operation URL, hence only a fallback.
+      Write-Output "  no async operation header returned; falling back to polling server state."
+      Start-Sleep -Seconds 30
+      do {
+        $check = Invoke-AzRestMethod -Method GET -Uri $serverUri
+        $state = ($check.Content | ConvertFrom-Json).properties.state
+        Write-Output "  server state: $state"
+        if ((Get-Date) -gt $deadline) {
+          throw "Server did not return to Ready within 15 minutes (last state: $state). Not writing to Key Vault - check the server before re-running."
+        }
+        if ($state -ne "Ready") { Start-Sleep -Seconds 15 }
+      } while ($state -ne "Ready")
+    }
 
     # --- Step 2: publish the new connection string to Key Vault -------------------------------
     # Only now that the server has accepted the password, so Key Vault never advertises a
@@ -142,11 +177,19 @@ resource "azurerm_automation_runbook" "rotate_postgres_password" {
       $kvToken = $tokenResponse.Token
     }
 
+    # Splatting rather than backtick line continuations: a backtick inside this Terraform
+    # heredoc is passed through literally, and an earlier version of this runbook failed at
+    # runtime with "A positional parameter cannot be found that accepts argument '`'" because
+    # of exactly that. Splatting keeps the call readable without any escaping to get wrong.
     $kvUri = "https://${var.key_vault_name}.vault.azure.net/secrets/${var.connection_string_secret_name}?api-version=7.4"
-    Invoke-RestMethod -Method PUT -Uri $kvUri ``
-      -Headers @{ Authorization = "Bearer $kvToken" } ``
-      -ContentType "application/json" ``
-      -Body (@{ value = $connectionString } | ConvertTo-Json) | Out-Null
+    $kvParams = @{
+      Method      = "PUT"
+      Uri         = $kvUri
+      Headers     = @{ Authorization = "Bearer $kvToken" }
+      ContentType = "application/json"
+      Body        = (@{ value = $connectionString } | ConvertTo-Json)
+    }
+    Invoke-RestMethod @kvParams | Out-Null
 
     Write-Output "Key Vault secret '${var.connection_string_secret_name}' updated."
 
