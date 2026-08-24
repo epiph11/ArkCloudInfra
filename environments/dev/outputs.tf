@@ -99,3 +99,11 @@ output "aws_alerts_sns_topic_arn" {
 output "aws_cloudtrail_bucket_name" {
   value = module.aws_cloudtrail.bucket_name
 }
+
+output "aws_guardduty_detector_id" {
+  value = module.aws_guardduty.detector_id
+}
+
+output "azure_defender_automation_export_name" {
+  value = module.azure_defender.automation_export_name
+}

@@ -14,25 +14,26 @@ bash modules/aws/secret-rotation/lambda/build.sh
 
 Sous Windows, via Git Bash (`& "C:\Program Files\Git\bin\bash.exe" ...`). Le script affiche le SHA-256 du zip produit : **il doit être identique en local et en CI**. S'il diffère, le build a cessé d'être reproductible et Terraform verra la Lambda changer un apply sur deux.
 
-**Hash de référence** — avec `psycopg2-binary==2.9.10` et `rotate.py` dans son état actuel, construit sous Windows/Git Bash :
+**Hash de référence** — avec `psycopg2-binary==2.9.10`, `rotate.py` dans son état actuel, et le fix `*.dist-info` ci-dessous, construit sous Windows/Git Bash (Python 3.14.6) :
 
 ```
-9628696840d3d64276d6cbbaebece7a56d2bcb51c9c0dfe8f968d23162900de0
+94eae308be13fa51c4876b7be67e49f7de976b3370d41771237c9d03282ad06b
 ```
 
-Cette valeur doit changer **uniquement** quand `rotate.py` ou la version épinglée changent. Si elle bouge sans qu'aucun des deux n'ait été touché, la reproductibilité est cassée — chercher la cause plutôt que mettre à jour cette ligne.
+Différente de l'ancienne valeur `9628696840d3...` — normal, le contenu du zip a changé (dist-info en moins), pas un problème. Cette valeur doit changer **uniquement** quand `rotate.py` ou la version épinglée changent. Si elle bouge sans qu'aucun des deux n'ait été touché, la reproductibilité est cassée — chercher la cause plutôt que mettre à jour cette ligne. **Pas encore validée contre un build CI** avec ce fix (voir l'historique du diagnostic ci-dessous pour pourquoi un plan vide seul n'est pas une preuve suffisante) — comparer explicitement au manifeste publié par la CI avant de considérer cette valeur comme confirmée des deux côtés.
 
-Reproductibilité local ↔ CI confirmée fin août 2026 : un `terraform plan` lancé en CI juste après un `apply` local est resté vide (`No changes`), preuve que les deux builds produisent le même `source_code_hash` sans avoir besoin de comparer les hashes à la main. Le manifeste par fichier (`build/manifest.txt`, publié dans le Summary CI) reste l'outil à utiliser si la divergence réapparaît un jour.
+**Historique du diagnostic (pour ne pas répéter les mêmes fausses pistes)** — la divergence local ↔ CI a été attribuée à tort, dans un premier temps, à des fins de ligne CRLF sur `rotate.py` (fix `.gitattributes` + `tr -d '\r'`, sans effet réel : `rotate.py` était déjà identique des deux côtés). Un `terraform plan` vide observé en CI avait ensuite été pris pour une preuve de reproductibilité — à tort aussi : il comparait le build de la CI à un state que la CI elle-même avait posé lors d'un apply précédent, pas au build local. La vraie cause, trouvée en comparant le manifeste par fichier local à celui publié par la CI (`build/manifest.txt`, un hash par fichier archivé) : un seul fichier différait sur 34, `psycopg2_binary-2.9.10.dist-info/RECORD` — pas du contenu téléchargé de PyPI, mais un fichier que **pip génère lui-même** à l'installation, formaté différemment selon la version de pip (Python 3.14.6 en local, une version différente en CI). Fixé en supprimant tout `*.dist-info` du package plutôt qu'en essayant de neutraliser ce fichier précis — rien dedans (RECORD, INSTALLER, METADATA, WHEEL, LICENSE, REQUESTED, top_level.txt) n'est lu par le runtime Lambda.
 
 ### Pourquoi un script plutôt que des commandes documentées
 
-Le module référence le zip via `filebase64sha256()`. Trois sources de non-déterminisme feraient varier ce hash sans qu'aucune ligne de code n'ait bougé, et le script les neutralise explicitement :
+Le module référence le zip via `filebase64sha256()`. Ces sources de non-déterminisme feraient varier ce hash sans qu'aucune ligne de code n'ait bougé, et le script les neutralise explicitement :
 
 | Source | Neutralisation |
 |---|---|
 | Version de `psycopg2-binary` résolue par pip | Épinglée exactement dans le script |
 | Dates de modification des fichiers | Normalisées à une date fixe avant l'archivage |
-| Ordre des fichiers et attributs de plateforme dans le zip | Liste triée + `zip -X` |
+| Ordre des fichiers et attributs de plateforme dans le zip | Liste triée + archiveur Python (`zipfile`), pas le binaire `zip` |
+| Métadonnées `*.dist-info` générées par pip (RECORD notamment) | Dossier supprimé entièrement après l'installation — cause confirmée de la divergence local/CI, voir ci-dessus |
 
 Le bytecode `.pyc` est également supprimé : inutile à l'exécution, et son contenu varie.
 

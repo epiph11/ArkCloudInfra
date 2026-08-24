@@ -154,3 +154,23 @@ variable "aws_postgres_instance_class" {
   type        = string
   default     = "db.t3.micro"
 }
+
+# --- Détection de menaces (Sprint 6) ---
+
+variable "azure_defender_alert_email" {
+  description = "Optionnel — reçoit les notifications de Microsoft Defender for Cloud (modules/azure/defender). Laissé non défini par défaut pour ne pas apparaître dans le contrôle de version ; à définir via TF_VAR_azure_defender_alert_email ou terraform.tfvars."
+  type        = string
+  default     = null
+}
+
+variable "azure_enable_defender_app_service" {
+  description = "Défaut false — Defender for App Service coûte ~14,60 $/instance/mois (2 App Services ici = ~29 $/mois), largement au-dessus du plafond cost-guard de 7 €/mois. Voir modules/azure/defender/variables.tf pour le détail. À activer pour staging/prod."
+  type        = bool
+  default     = false
+}
+
+variable "azure_enable_defender_databases" {
+  description = "Défaut false — même arbitrage budgétaire que azure_enable_defender_app_service, pour le plan Defender for Databases (PostgreSQL Flexible Server)."
+  type        = bool
+  default     = false
+}

@@ -73,6 +73,18 @@ tr -d '\r' < rotate.py > build/package/rotate.py
 find build/package -name '__pycache__' -type d -prune -exec rm -rf {} +
 find build/package -name '*.pyc' -delete
 
+# Cause RÉELLE de la divergence local/CI, trouvée via le manifeste par fichier (pas devinée) :
+# psycopg2_binary-2.9.10.dist-info/RECORD différait entre un build local (Python 3.14.6) et un
+# build CI — SEUL fichier différent sur les 34, rotate.py compris (hash identique des deux
+# côtés). RECORD n'est pas du contenu téléchargé de PyPI : pip le GÉNÈRE lui-même à
+# l'installation, et deux versions de pip le formatent différemment. La théorie CRLF
+# (.gitattributes, tr -d '\r' sur rotate.py) était donc fausse depuis le début — rotate.py
+# n'a jamais divergé. Rien dans *.dist-info (RECORD, INSTALLER, METADATA, WHEEL, LICENSE,
+# REQUESTED, top_level.txt) n'est lu à l'exécution par le runtime Lambda — uniquement par pip
+# pour la désinstallation/mise à jour, inutile ici. Le supprimer élimine la source de
+# non-déterminisme au lieu d'essayer de la neutraliser fichier par fichier.
+find build/package -maxdepth 1 -iname '*.dist-info' -type d -exec rm -rf {} +
+
 # Archivage via le module zipfile de Python plutôt que le binaire `zip` : ce dernier n'est pas
 # livré avec Git Bash sous Windows, et surtout Python permet de fixer explicitement date,
 # permissions et ordre des entrées — ce qui rend le zip identique octet pour octet quelle que

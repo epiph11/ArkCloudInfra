@@ -553,3 +553,73 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
     ignore_changes = [log_analytics_destination_type]
   }
 }
+
+# ---------------------------------------------------------------------------
+# Détection de menaces — GuardDuty (AWS) + Defender for Cloud (Azure). Même politique de
+# sécurité sur les deux clouds, mécanismes distincts (voir README.md §10 pour la comparaison
+# complète et le raisonnement coût derrière ce qui est activé vs laissé optionnel).
+# ---------------------------------------------------------------------------
+
+module "aws_guardduty" {
+  source = "../../modules/aws/guardduty"
+
+  name_prefix = "arkcloud-${var.environment}"
+
+  # Réutilise le topic d'alertes existant plutôt qu'un second canal — un finding GuardDuty
+  # atterrit dans la même boîte mail que les alarmes CloudWatch et les échecs de rotation.
+  alarm_sns_topic_arn = module.aws_monitoring.sns_topic_arn
+
+  tags = local.common_tags
+}
+
+# Politique du topic SNS d'alertes — UN SEUL propriétaire pour cette resource policy, ici, au
+# niveau racine. EventBridge (GuardDuty) est aujourd'hui le seul consommateur externe à ce topic
+# qui a besoin d'une permission explicite (les CloudWatch Alarms de modules/aws/monitoring et
+# modules/aws/secret-rotation n'en ont pas besoin, comportement historique AWS pour les services
+# same-account). Si un futur module a besoin de publier ici aussi, AJOUTER un statement à ce même
+# document plutôt que déclarer un second aws_sns_topic_policy sur le même topic ailleurs — deux
+# ressources Terraform propriétaires d'un même attribut de politique se contrediraient à chaque
+# plan, exactement le bug de security group flip-flop déjà rencontré et corrigé ce sprint
+# (voir modules/aws/security/main.tf).
+data "aws_iam_policy_document" "alerts_sns_topic" {
+  statement {
+    sid    = "AllowEventBridgeGuardDutyFindings"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+
+    actions   = ["SNS:Publish"]
+    resources = [module.aws_monitoring.sns_topic_arn]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = [module.aws_guardduty.event_rule_arn]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "alerts" {
+  arn    = module.aws_monitoring.sns_topic_arn
+  policy = data.aws_iam_policy_document.alerts_sns_topic.json
+}
+
+module "azure_defender" {
+  source = "../../modules/azure/defender"
+
+  resource_group_name = module.resource_group.name
+  location            = var.location
+  name_prefix         = "arkcloud-${var.environment}"
+
+  log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+
+  alert_email = var.azure_defender_alert_email
+
+  enable_defender_app_service = var.azure_enable_defender_app_service
+  enable_defender_databases   = var.azure_enable_defender_databases
+
+  tags = local.common_tags
+}
