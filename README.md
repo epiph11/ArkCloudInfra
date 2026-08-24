@@ -433,6 +433,21 @@ Pas d'équivalent côté `app-arkcloud-web-dev` — Blazor ne lit aucun secret d
 
 Le premier vrai run de `terraform-ci.yml` a remonté 28 findings sur `environments/dev`. Pas de faux positifs — un vrai désaccord entre le jeu de règles "prod durcie par défaut" de Checkov et des choix faits consciemment pour un environnement **dev**. Décision : corriger ce qui est gratuit et sans compromis, documenter (`skip_check` dans `terraform-ci.yml`) le reste plutôt que soit payer pour rien sur du dev jetable, soit désactiver le scanner.
 
+### Voir les findings avant de pousser, pas seulement après (Sprint 6)
+
+`terraform plan` en local ne dit rien sur la posture sécurité — seul le job CI faisait tourner Checkov, donc chaque nouveau finding se découvrait après coup, une fois poussé. Deux pièces, sous contrôle de version :
+
+- **`scripts/checkov-local.sh`** — fait tourner exactement la même image (`ghcr.io/bridgecrewio/checkov:3.3.13`) que la CI, avec la même liste `skip_check`, lue directement dans `terraform-ci.yml` plutôt que dupliquée (sinon les deux listes divergent tôt ou tard — même principe que le reste de la discipline "une seule source de vérité" de ce sprint).
+- **`githooks/pre-push`** — bloque le push si Checkov trouve un finding non skippé, miroir du `soft_fail: false` de la CI. Nécessite Docker en local ; s'il est absent, avertit et laisse passer plutôt que bloquer sur un outil manquant (la CI reste le filet de sécurité dans tous les cas).
+
+Activation, une fois par clone (git n'utilise jamais `.git/hooks/` automatiquement pour un dossier versionné) :
+
+```bash
+git config core.hooksPath githooks
+```
+
+Pour pousser malgré un échec Checkov en connaissance de cause (rare, à documenter dans le message de commit si utilisé) : `git push --no-verify`.
+
 ### Corrigés dans le code (aucun compromis, applicable à tout environnement)
 
 - **`CKV_AZURE_78`** (FTP déploiement) — `ftps_state = "Disabled"` dans `modules/azure/app-service/main.tf`. Le déploiement passe par Terraform/GHCR, jamais par FTP — aucune raison de laisser cette surface active.

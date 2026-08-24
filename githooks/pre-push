@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Hook git pre-push — fait tourner Checkov localement (scripts/checkov-local.sh) avant chaque
+# push, pour voir les findings avant que la CI ne les découvre après coup. Miroir de
+# terraform-ci.yml's soft_fail: false : un finding non skippé bloque le push, comme il
+# bloquerait le job CI.
+#
+# Non versionné dans .git/hooks (jamais commité par git) — vit ici, sous contrôle de version,
+# activé une fois par clone via :
+#   git config core.hooksPath githooks
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "⚠ Docker introuvable — impossible de faire tourner Checkov en local avant ce push." >&2
+  echo "  La CI le fera de toute façon (filet de sécurité), mais tu ne verras les findings" >&2
+  echo "  qu'après le push plutôt qu'avant. Push autorisé quand même (pas de blocage sur un" >&2
+  echo "  outil absent, seulement sur un vrai finding)." >&2
+  exit 0
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "⚠ Docker est installé mais ne répond pas (Docker Desktop lancé ?) — même situation" >&2
+  echo "  que Docker absent : push autorisé, la CI reste le filet de sécurité." >&2
+  exit 0
+fi
+
+echo "Checkov (pre-push) — vérification avant d'envoyer..."
+echo
+
+if bash scripts/checkov-local.sh; then
+  echo
+  echo "Checkov OK — push autorisé."
+  exit 0
+else
+  echo
+  echo "✗ Checkov a trouvé au moins un finding non skippé — push bloqué." >&2
+  echo "  Corriger le code, ou si le finding est un vrai faux positif/arbitrage dev-tier," >&2
+  echo "  l'ajouter à skip_check dans .github/workflows/terraform-ci.yml AVEC le raisonnement" >&2
+  echo "  documenté (voir README.md §9 pour le format attendu) avant de le skipper ici aussi." >&2
+  echo "  Pour forcer le push malgré tout (déconseillé) : git push --no-verify" >&2
+  exit 1
+fi
