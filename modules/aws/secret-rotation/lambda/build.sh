@@ -61,7 +61,12 @@ mkdir -p build/package
   --target build/package \
   "psycopg2-binary==${PSYCOPG2_VERSION}"
 
-cp rotate.py build/package/
+# Fins de ligne forcées en LF plutôt qu'un simple `cp` : sous Windows, Git peut checkouter
+# rotate.py en CRLF (core.autocrlf), et le même code source produirait alors un zip différent
+# de celui construit sur le runner Linux. .gitattributes couvre le cas au checkout ; ceci le
+# couvre aussi pour un dépôt cloné avant son ajout, ou avec une configuration Git locale
+# divergente. Constaté pour de vrai : premier build CI vs local, hashes différents.
+tr -d '\r' < rotate.py > build/package/rotate.py
 
 # Le bytecode compilé n'est pas nécessaire à l'exécution et son contenu varie — il ferait varier
 # le hash sans raison.
@@ -102,7 +107,18 @@ with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
         with open(full, "rb") as fh:
             z.writestr(info, fh.read())
 
+# Empreinte par fichier, pas seulement du zip final : quand deux plateformes produisent des
+# hashes différents, cette liste localise immédiatement LE fichier responsable au lieu de
+# laisser deviner. Écrite dans build/manifest.txt, et non affichée en entier — quelques
+# centaines de lignes pollueraient les logs CI pour rien.
+manifest = os.path.join(os.path.dirname(dst), "manifest.txt")
+with open(manifest, "w", newline="\n") as mf:
+    for rel, full in paths:
+        h = hashlib.sha256(open(full, "rb").read()).hexdigest()
+        mf.write(f"{h}  {rel}\n")
+
 print(f"{len(paths)} fichiers archivés")
+print("manifest :", manifest)
 print("sha256 :", hashlib.sha256(open(dst, "rb").read()).hexdigest())
 PYEOF
 

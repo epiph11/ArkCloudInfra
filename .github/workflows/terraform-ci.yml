@@ -74,7 +74,19 @@ jobs:
         # Chemin absolu via $GITHUB_WORKSPACE : les deux jobs définissent un working-directory
         # par défaut (environments/<env>), donc un chemin relatif à la racine du dépôt serait
         # résolu depuis là et introuvable.
-        run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+        run: |
+          bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+          # Empreinte de chaque fichier archivé, publiée dans le résumé du run : si le sha256 du
+          # zip diverge un jour de celui construit en local, comparer ces deux listes localise le
+          # fichier fautif au lieu d'obliger à supposer.
+          {
+            echo '<details><summary>Manifeste du package Lambda</summary>'
+            echo
+            echo '```'
+            cat "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build/manifest.txt"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: terraform fmt -check
         run: terraform fmt -check -recursive
@@ -373,7 +385,19 @@ jobs:
         # Chemin absolu via $GITHUB_WORKSPACE : les deux jobs définissent un working-directory
         # par défaut (environments/<env>), donc un chemin relatif à la racine du dépôt serait
         # résolu depuis là et introuvable.
-        run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+        run: |
+          bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+          # Empreinte de chaque fichier archivé, publiée dans le résumé du run : si le sha256 du
+          # zip diverge un jour de celui construit en local, comparer ces deux listes localise le
+          # fichier fautif au lieu d'obliger à supposer.
+          {
+            echo '<details><summary>Manifeste du package Lambda</summary>'
+            echo
+            echo '```'
+            cat "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build/manifest.txt"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: terraform init
         run: terraform init

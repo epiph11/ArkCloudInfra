@@ -1,0 +1,21 @@
+# Fins de ligne normalisées en LF dans le dépôt ET dans les checkouts, quelle que soit la
+# plateforme. Sans ça, Git convertit en CRLF sur Windows (core.autocrlf par défaut) : le même
+# fichier a alors un contenu différent selon la machine.
+#
+# Ce n'est pas cosmétique ici. modules/aws/secret-rotation référence son package Lambda via
+# filebase64sha256() : un rotate.py en CRLF localement et en LF sur le runner CI produit deux
+# zips différents pour un code identique, donc deux source_code_hash, donc une Lambda que
+# Terraform met à jour à chaque alternance entre un apply local et un apply CI.
+*.py    text eol=lf
+*.sh    text eol=lf
+*.tf    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+
+# Binaires : jamais de conversion.
+*.png   binary
+*.jpg   binary
+*.zip   binary
+*.docx  binary
