@@ -22,6 +22,8 @@ Sous Windows, via Git Bash (`& "C:\Program Files\Git\bin\bash.exe" ...`). Le scr
 
 Cette valeur doit changer **uniquement** quand `rotate.py` ou la version épinglée changent. Si elle bouge sans qu'aucun des deux n'ait été touché, la reproductibilité est cassée — chercher la cause plutôt que mettre à jour cette ligne.
 
+Reproductibilité local ↔ CI confirmée fin août 2026 : un `terraform plan` lancé en CI juste après un `apply` local est resté vide (`No changes`), preuve que les deux builds produisent le même `source_code_hash` sans avoir besoin de comparer les hashes à la main. Le manifeste par fichier (`build/manifest.txt`, publié dans le Summary CI) reste l'outil à utiliser si la divergence réapparaît un jour.
+
 ### Pourquoi un script plutôt que des commandes documentées
 
 Le module référence le zip via `filebase64sha256()`. Trois sources de non-déterminisme feraient varier ce hash sans qu'aucune ligne de code n'ait bougé, et le script les neutralise explicitement :
