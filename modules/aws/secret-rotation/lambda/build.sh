@@ -86,11 +86,11 @@ find build/package -name '*.pyc' -delete
 find build/package -maxdepth 1 -iname '*.dist-info' -type d -exec rm -rf {} +
 
 # Archivage via le module zipfile de Python plutôt que le binaire `zip` : ce dernier n'est pas
-# livré avec Git Bash sous Windows, et surtout Python permet de fixer explicitement date,
-# permissions et ordre des entrées — ce qui rend le zip identique octet pour octet quelle que
-# soit la plateforme. Compress-Archive (PowerShell) et `zip` (Linux) ne produisent PAS le même
+# livré avec Git Bash sous Windows, et Python permet de fixer explicitement date, permissions et
+# ordre des entrées. Compress-Archive (PowerShell) et `zip` (Linux) ne produisent PAS le même
 # flux d'octets pour un même contenu, ce qui suffirait à recréer le flip-flop qu'on cherche
-# précisément à éviter.
+# précisément à éviter. Mais fixer date/permissions/ordre ne suffit PAS à lui seul à garantir un
+# zip identique octet pour octet — voir le choix de ZIP_STORED juste en dessous.
 "$PY" - "$PWD/build/package" "$PWD/build/rotate.zip" <<'PYEOF'
 import hashlib, os, sys, zipfile
 
@@ -108,13 +108,24 @@ for root, dirs, files in os.walk(src):
         paths.append((rel, full))
 paths.sort(key=lambda p: p[0])
 
-with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+# ZIP_STORED (pas de compression), pas ZIP_DEFLATED : preuve trouvée via le manifeste par
+# fichier (build/manifest.txt) — les 27 fichiers archivés ont un hash SOURCE identique entre un
+# build local (Windows, Python 3.14.6) et un build CI (Ubuntu), rotate.py compris, et pourtant
+# le zip final différait. Seule explication restante : DEFLATE via zlib n'est PAS garanti
+# bit-identique entre deux versions de zlib pour un même contenu source — le contenu décompressé
+# est identique, le flux compressé ne l'est pas. C'est une source de non-déterminisme connue et
+# documentée (reproducible-builds.org), indépendante de tout ce que ce script contrôle par
+# ailleurs (dates, ordre, permissions, contenu). ZIP_STORED élimine la compression, donc élimine
+# cette source à la racine plutôt que d'essayer de la neutraliser. Coût : un zip plus gros —
+# sans conséquence ici (psycopg2-binary fait ~3 Mo compressé, largement sous la limite Lambda de
+# 50 Mo pour un upload direct).
+with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as z:
     for rel, full in paths:
         info = zipfile.ZipInfo(rel, date_time=FIXED_DATE)
         # Permissions figées : celles du système de fichiers local varient (Windows vs Linux)
         # et seraient sinon stockées telles quelles dans l'archive.
         info.external_attr = 0o644 << 16
-        info.compress_type = zipfile.ZIP_DEFLATED
+        info.compress_type = zipfile.ZIP_STORED
         info.create_system = 3  # Unix, quel que soit l'OS de build
         with open(full, "rb") as fh:
             z.writestr(info, fh.read())

@@ -14,15 +14,14 @@ bash modules/aws/secret-rotation/lambda/build.sh
 
 Sous Windows, via Git Bash (`& "C:\Program Files\Git\bin\bash.exe" ...`). Le script affiche le SHA-256 du zip produit : **il doit être identique en local et en CI**. S'il diffère, le build a cessé d'être reproductible et Terraform verra la Lambda changer un apply sur deux.
 
-**Hash de référence** — avec `psycopg2-binary==2.9.10`, `rotate.py` dans son état actuel, et le fix `*.dist-info` ci-dessous, construit sous Windows/Git Bash (Python 3.14.6) :
+**Hash de référence** — avec `psycopg2-binary==2.9.10`, `rotate.py` dans son état actuel, `*.dist-info` supprimé et l'archivage en `ZIP_STORED` (voir historique ci-dessous), à régénérer et comparer au prochain build des deux côtés — pas encore stabilisé au moment d'écrire ceci. Cette valeur doit changer **uniquement** quand `rotate.py` ou la version épinglée changent. Si elle bouge sans qu'aucun des deux n'ait été touché, la reproductibilité est cassée — chercher la cause plutôt que mettre à jour cette ligne. Toujours comparer au manifeste publié par la CI avant de considérer une valeur comme confirmée des deux côtés — un `terraform plan` vide seul ne suffit pas (voir pourquoi ci-dessous).
 
-```
-94eae308be13fa51c4876b7be67e49f7de976b3370d41771237c9d03282ad06b
-```
+**Historique du diagnostic (pour ne pas répéter les mêmes fausses pistes)** — trois hypothèses successives, chacune tranchée par une preuve directe plutôt que supposée corrigée :
+1. Fins de ligne CRLF sur `rotate.py` (fix `.gitattributes` + `tr -d '\r'`) — sans effet réel, `rotate.py` était déjà identique des deux côtés.
+2. Un `terraform plan` vide observé en CI, pris pour une preuve de reproductibilité — à tort : il comparait le build de la CI à un state que la CI elle-même avait posé lors d'un apply précédent, pas au build local, donc ne prouvait rien sur la divergence local/CI.
+3. `psycopg2_binary-2.9.10.dist-info/RECORD` — trouvé via le manifeste par fichier, seul fichier différent sur 34, formaté différemment selon la version de pip qui le génère. Fixé en supprimant tout `*.dist-info` (rien dedans n'est lu par le runtime Lambda).
 
-Différente de l'ancienne valeur `9628696840d3...` — normal, le contenu du zip a changé (dist-info en moins), pas un problème. Cette valeur doit changer **uniquement** quand `rotate.py` ou la version épinglée changent. Si elle bouge sans qu'aucun des deux n'ait été touché, la reproductibilité est cassée — chercher la cause plutôt que mettre à jour cette ligne. **Pas encore validée contre un build CI** avec ce fix (voir l'historique du diagnostic ci-dessous pour pourquoi un plan vide seul n'est pas une preuve suffisante) — comparer explicitement au manifeste publié par la CI avant de considérer cette valeur comme confirmée des deux côtés.
-
-**Historique du diagnostic (pour ne pas répéter les mêmes fausses pistes)** — la divergence local ↔ CI a été attribuée à tort, dans un premier temps, à des fins de ligne CRLF sur `rotate.py` (fix `.gitattributes` + `tr -d '\r'`, sans effet réel : `rotate.py` était déjà identique des deux côtés). Un `terraform plan` vide observé en CI avait ensuite été pris pour une preuve de reproductibilité — à tort aussi : il comparait le build de la CI à un state que la CI elle-même avait posé lors d'un apply précédent, pas au build local. La vraie cause, trouvée en comparant le manifeste par fichier local à celui publié par la CI (`build/manifest.txt`, un hash par fichier archivé) : un seul fichier différait sur 34, `psycopg2_binary-2.9.10.dist-info/RECORD` — pas du contenu téléchargé de PyPI, mais un fichier que **pip génère lui-même** à l'installation, formaté différemment selon la version de pip (Python 3.14.6 en local, une version différente en CI). Fixé en supprimant tout `*.dist-info` du package plutôt qu'en essayant de neutraliser ce fichier précis — rien dedans (RECORD, INSTALLER, METADATA, WHEEL, LICENSE, REQUESTED, top_level.txt) n'est lu par le runtime Lambda.
+Après le fix #3, un nouveau manifeste comparé des deux côtés a montré les **27 fichiers restants strictement identiques** — `rotate.py` compris — et pourtant le zip final différait toujours. Ça élimine tout le contenu comme cause possible et pointe vers l'archivage lui-même : `zipfile` compresse via `zlib`, et `zlib` ne garantit PAS un flux DEFLATE identique bit à bit entre deux versions/plateformes pour un même contenu source (documenté sur reproducible-builds.org) — le contenu décompressé est identique, les octets compressés dans le zip ne le sont pas. Fixé en passant l'archivage en `ZIP_STORED` (pas de compression) plutôt qu'en essayant de figer une version de zlib. Coût négligeable ici : le package fait quelques Mo, largement sous la limite Lambda de 50 Mo pour un upload direct.
 
 ### Pourquoi un script plutôt que des commandes documentées
 
@@ -33,7 +32,8 @@ Le module référence le zip via `filebase64sha256()`. Ces sources de non-déter
 | Version de `psycopg2-binary` résolue par pip | Épinglée exactement dans le script |
 | Dates de modification des fichiers | Normalisées à une date fixe avant l'archivage |
 | Ordre des fichiers et attributs de plateforme dans le zip | Liste triée + archiveur Python (`zipfile`), pas le binaire `zip` |
-| Métadonnées `*.dist-info` générées par pip (RECORD notamment) | Dossier supprimé entièrement après l'installation — cause confirmée de la divergence local/CI, voir ci-dessus |
+| Métadonnées `*.dist-info` générées par pip (RECORD notamment) | Dossier supprimé entièrement après l'installation |
+| Flux DEFLATE non garanti identique entre versions de `zlib` | `ZIP_STORED` (pas de compression) plutôt que `ZIP_DEFLATED` — cause confirmée de la divergence restante, voir ci-dessus |
 
 Le bytecode `.pyc` est également supprimé : inutile à l'exécution, et son contenu varie.
 
