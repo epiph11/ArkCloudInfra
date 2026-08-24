@@ -274,6 +274,16 @@ jobs:
       #     package is built by a trusted pipeline rather than by the documented local build
       #     command (modules/aws/secret-rotation/lambda/README.md). Revisit if Lambda packaging
       #     moves into CI.
+      #   - CKV_AWS_304 (rotation Secrets Manager sous 90 jours) : faux positif de résolution de
+      #     variable, diagnostic établi en lisant le code source du check et non supposé. Sa
+      #     condition est `days <= 90`, donc notre valeur de 90 passerait — mais elle est fournie
+      #     via var.rotation_interval_days, que Checkov ne résout pas à travers la frontière de
+      #     module ; force_int() renvoie alors None et le check retombe sur son cas d'échec.
+      #     Même classe que CKV_AZURE_43 plus haut.
+      #     Le check soulevait néanmoins un point réel — 90 n'était qu'un défaut modifiable — donc
+      #     plutôt que de seulement l'écarter, la contrainte est désormais RÉELLEMENT appliquée par
+      #     un bloc validation sur la variable, des deux côtés (modules/aws/secret-rotation et
+      #     modules/azure/secret-rotation) : tout intervalle > 90 jours fait échouer le plan.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -295,7 +305,7 @@ jobs:
             CKV2_AZURE_24,
             CKV_AZURE_59,CKV_AZURE_43,CKV_AZURE_206,CKV_AZURE_33,
             CKV2_AZURE_1,CKV2_AZURE_33,CKV2_AZURE_40,CKV2_AZURE_41,
-            CKV_AWS_115,CKV_AWS_116,CKV_AWS_173,CKV_AWS_272
+            CKV_AWS_115,CKV_AWS_116,CKV_AWS_173,CKV_AWS_272,CKV_AWS_304
 
       - name: terraform init
         run: terraform init

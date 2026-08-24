@@ -472,6 +472,14 @@ Corrigé : `CKV_AWS_50` (traçage X-Ray — réellement utile ici : les deux bug
 - **`CKV_AWS_173`** (variables d'environnement non chiffrées par une clé KMS gérée par le client) — elles sont déjà chiffrées au repos par une clé gérée par AWS, et **aucune de ces variables n'est un secret** (hôte/nom/utilisateur de la base, noms de cluster et de service ECS — le mot de passe n'existe que dans Secrets Manager et en mémoire de la fonction). Même arbitrage que `CKV_AWS_136`/`158`/`149`.
 - **`CKV_AWS_272`** (pas de validation de signature de code) — demande un profil AWS Signer : vraie infrastructure de chaîne d'approvisionnement, et pertinente seulement une fois le package construit par un pipeline de confiance plutôt que par la commande de build locale documentée. À reconsidérer si le packaging Lambda passe en CI.
 
+### Sprint 6 — `CKV_AWS_304` : un faux positif qui pointait quand même un vrai manque
+
+**Le finding** : « Ensure Secrets Manager secrets should be rotated within 90 days » échouait sur la ressource construite précisément pour rotater à 90 jours.
+
+**Diagnostic, établi en lisant le code source du check** (`SecretManagerSecret90days.py`) plutôt qu'en supposant : sa condition est `days <= 90`, donc notre valeur passerait. Mais elle est fournie via `var.rotation_interval_days`, que Checkov ne résout pas à travers une frontière de module — `force_int()` renvoie `None`, et le check retombe sur son `CheckResult.FAILED` par défaut. Même classe de faux positif que `CKV_AZURE_43`.
+
+**Ce qui a été fait au-delà du skip** : le check avait beau échouer pour une mauvaise raison, il pointait un manque réel — 90 jours n'était chez nous qu'une **valeur par défaut**, que n'importe quel appelant pouvait porter à 365 sans que rien ne s'y oppose. La « politique de rotation à 90 jours » n'était donc qu'une convention orale. Un bloc `validation` a été ajouté sur la variable **des deux côtés** (`modules/aws/secret-rotation` et `modules/azure/secret-rotation`) : tout intervalle supérieur à 90 jours fait désormais échouer le plan. La contrainte est réellement appliquée, pas seulement documentée — et par Terraform lui-même, pas par un scanner qu'on pourrait désactiver.
+
 ### Sprint 6 — HTTPS sur l'ALB AWS (certificat auto-signé)
 
 Corrigés (`modules/aws/alb/main.tf`) : `CKV_AWS_2` (listener HTTPS), `CKV2_AWS_20` (redirect HTTP→HTTPS), `CKV_AWS_103` (politique TLS 1.2 minimum). Pas de domaine réel pour ce projet → pas de certificat ACM validé par DNS possible → certificat auto-signé généré par Terraform (`tls_private_key`/`tls_self_signed_cert`) importé dans ACM. Chiffre bien le trafic navigateur↔ALB, mais sans chaîne de confiance : le navigateur affiche un avertissement. Acceptable en dev (trafic health-check/tests, pas d'utilisateurs réels) ; à remplacer par un vrai certificat DNS-validé dès qu'un domaine existe — les ressources ne changent pas de forme, juste la source du certificat.

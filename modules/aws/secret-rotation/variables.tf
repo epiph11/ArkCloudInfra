@@ -62,9 +62,23 @@ variable "security_group_id" {
 }
 
 variable "rotation_interval_days" {
-  description = "90 days, matching modules/azure/secret-rotation's schedule so both clouds follow one policy."
+  description = "90 jours, aligné sur modules/azure/secret-rotation pour que les deux clouds suivent une seule politique."
   type        = number
   default     = 90
+
+  # Plafond réellement appliqué, pas seulement une valeur par défaut : sans cette validation,
+  # n'importe quel appelant pourrait porter l'intervalle à 365 jours sans que rien ne s'y oppose,
+  # et la « politique de rotation à 90 jours » ne serait qu'une convention orale.
+  #
+  # Le seuil de 90 n'est pas arbitraire : c'est celui retenu par les référentiels de sécurité
+  # courants, et celui que le check Checkov CKV_AWS_304 vérifie (condition `days <= 90`, lue
+  # dans son code source). Ce check échoue chez nous en faux positif — il ne sait pas résoudre
+  # une variable à travers une frontière de module et retombe alors sur son cas d'échec. Cette
+  # validation fait donc ce que le check voulait garantir, mais de façon réellement appliquée.
+  validation {
+    condition     = var.rotation_interval_days > 0 && var.rotation_interval_days <= 90
+    error_message = "L'intervalle de rotation doit être compris entre 1 et 90 jours (politique de sécurité du projet, alignée sur Azure et sur CKV_AWS_304)."
+  }
 }
 
 variable "lambda_zip_path" {

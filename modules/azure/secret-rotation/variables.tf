@@ -59,9 +59,17 @@ variable "app_service_name" {
 }
 
 variable "rotation_interval_days" {
-  description = "90 days — the common enterprise baseline: short enough to bound the exposure window of a leaked credential, long enough that each rotation (which briefly restarts the API) stays a non-event."
+  description = "90 jours — la référence courante en entreprise : assez court pour borner la fenêtre d'exposition d'un identifiant fuité, assez espacé pour que chaque rotation (qui redémarre brièvement l'API) reste un non-événement."
   type        = number
   default     = 90
+
+  # Même plafond appliqué que côté AWS (modules/aws/secret-rotation) — une politique de rotation
+  # commune aux deux clouds n'a de sens que si les deux la font respecter, pas si l'une des deux
+  # se contente d'une valeur par défaut modifiable sans contrainte.
+  validation {
+    condition     = var.rotation_interval_days > 0 && var.rotation_interval_days <= 90
+    error_message = "L'intervalle de rotation doit être compris entre 1 et 90 jours (politique de sécurité du projet, identique côté AWS)."
+  }
 }
 
 variable "rotation_start_time" {
