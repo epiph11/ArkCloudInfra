@@ -617,6 +617,7 @@ module "azure_defender" {
   log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
 
   alert_email = var.azure_defender_alert_email
+  alert_phone = var.azure_defender_alert_phone
 
   enable_defender_app_service = var.azure_enable_defender_app_service
   enable_defender_databases   = var.azure_enable_defender_databases

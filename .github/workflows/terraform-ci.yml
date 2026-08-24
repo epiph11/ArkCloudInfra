@@ -311,6 +311,25 @@ jobs:
       #     plutôt que de seulement l'écarter, la contrainte est désormais RÉELLEMENT appliquée par
       #     un bloc validation sur la variable, des deux côtés (modules/aws/secret-rotation et
       #     modules/azure/secret-rotation) : tout intervalle > 90 jours fait échouer le plan.
+      #
+      # GuardDuty / Defender for Cloud (Sprint 6, modules/aws/guardduty + modules/azure/defender)
+      # — 2 findings d'un run réel, aucun fixé en dur, les deux écartés avec un vrai chemin
+      # d'activation laissé ouvert plutôt que fermé :
+      #   - CKV_AZURE_20 (numéro de téléphone du contact de sécurité Defender) : le module
+      #     accepte déjà un var.alert_phone optionnel (azurerm_security_center_contact.this),
+      #     câblé jusqu'à azure_defender_alert_phone en racine — non renseigné par défaut parce
+      #     que c'est une donnée personnelle, jamais codée en dur ni committée même comme valeur
+      #     par défaut. Le canal email (déjà utilisé partout ailleurs dans ce projet : sujet SNS,
+      #     cost-guard) reste le canal d'alerte principal ; le téléphone est un vrai plus pour
+      #     une alerte critique, activable via terraform.tfvars sans toucher au code.
+      #   - CKV2_AWS_3 (GuardDuty activé au niveau organisation) : vérifié contre la source du
+      #     check (GuardDuty is Enabled graph check) — il réclame un
+      #     aws_guardduty_organization_configuration lié au détecteur avec auto_enable=true,
+      #     un mécanisme AWS Organizations pour activer GuardDuty automatiquement sur tous les
+      #     comptes membres. Ce projet est un compte AWS unique, pas une Organization ; cette
+      #     ressource échouerait même à l'apply (elle exige que le compte soit déjà l'admin
+      #     délégué GuardDuty d'une Organization). Pas un manque, une architecture différente de
+      #     celle que le check suppose.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -332,7 +351,8 @@ jobs:
             CKV2_AZURE_24,
             CKV_AZURE_59,CKV_AZURE_43,CKV_AZURE_206,CKV_AZURE_33,
             CKV2_AZURE_1,CKV2_AZURE_33,CKV2_AZURE_40,CKV2_AZURE_41,
-            CKV_AWS_115,CKV_AWS_116,CKV_AWS_173,CKV_AWS_272,CKV_AWS_304
+            CKV_AWS_115,CKV_AWS_116,CKV_AWS_173,CKV_AWS_272,CKV_AWS_304,
+            CKV_AZURE_20,CKV2_AWS_3
 
       - name: terraform init
         run: terraform init

@@ -22,6 +22,12 @@ variable "alert_email" {
   default     = null
 }
 
+variable "alert_phone" {
+  description = "Optionnel — permet à Microsoft de joindre le contact par téléphone pour une alerte critique (azurerm_security_center_contact). Laissé non défini par défaut : c'est une donnée personnelle, pas quelque chose à coder en dur ou committer même comme valeur par défaut ; à définir via TF_VAR_azure_defender_alert_phone ou terraform.tfvars si souhaité. CKV_AZURE_20 le réclame — écarté dans terraform-ci.yml plutôt que forcé, voir le commentaire à côté de ce skip pour le raisonnement complet."
+  type        = string
+  default     = null
+}
+
 variable "enable_defender_app_service" {
   description = "Défaut false — délibéré, pas un oubli. Defender for App Service coûte environ 14,60 $/instance/mois (vérifié sur la page de pricing Azure) ; avec les deux App Services de ce projet (API + Web), ça représente ~29 $/mois, soit environ 4x le plafond de 7 €/mois déjà fixé pour tout le resource group par modules/azure/cost-guard. Disproportionné pour un environnement dev. À activer pour staging/prod, où un vrai SLA de sécurité applicative se justifie. Pour tester sans payer le tarif plein : Azure offre 30 jours gratuits dès l'activation d'un plan payant (vérifié sur la page de pricing officielle) — activer, vérifier dans le portail (Defender for Cloud > Environment settings), repasser à false avant l'échéance ou dans la même journée pour rester dans la fenêtre gratuite."
   type        = bool

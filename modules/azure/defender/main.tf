@@ -56,6 +56,7 @@ resource "azurerm_security_center_contact" "this" {
 
   name  = "arkcloud-defender-contact-${var.name_prefix}"
   email = var.alert_email
+  phone = var.alert_phone
 
   alert_notifications = true
   alerts_to_admins    = true

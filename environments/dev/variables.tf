@@ -163,6 +163,12 @@ variable "azure_defender_alert_email" {
   default     = null
 }
 
+variable "azure_defender_alert_phone" {
+  description = "Optionnel — numéro joignable par Microsoft pour une alerte Defender critique. Laissé non défini par défaut (donnée personnelle, jamais committée) ; à définir via TF_VAR_azure_defender_alert_phone ou terraform.tfvars si souhaité."
+  type        = string
+  default     = null
+}
+
 variable "azure_enable_defender_app_service" {
   description = "Défaut false — Defender for App Service coûte ~14,60 $/instance/mois (2 App Services ici = ~29 $/mois), largement au-dessus du plafond cost-guard de 7 €/mois. Voir modules/azure/defender/variables.tf pour le détail. À activer pour staging/prod."
   type        = bool
