@@ -71,7 +71,10 @@ jobs:
       # produirait une wheel pour le runner et non pour le runtime Lambda, avec une erreur
       # d'import qui n'apparaîtrait qu'à la première rotation réelle.
       - name: Build du package Lambda de rotation
-        run: bash modules/aws/secret-rotation/lambda/build.sh
+        # Chemin absolu via $GITHUB_WORKSPACE : les deux jobs définissent un working-directory
+        # par défaut (environments/<env>), donc un chemin relatif à la racine du dépôt serait
+        # résolu depuis là et introuvable.
+        run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
 
       - name: terraform fmt -check
         run: terraform fmt -check -recursive
@@ -367,7 +370,10 @@ jobs:
       # absent d'un checkout frais. Sans lui, l'apply échoue à l'évaluation de filebase64sha256()
       # avant de toucher quoi que ce soit — donc sans dégât, mais sans déploiement non plus.
       - name: Build du package Lambda de rotation
-        run: bash modules/aws/secret-rotation/lambda/build.sh
+        # Chemin absolu via $GITHUB_WORKSPACE : les deux jobs définissent un working-directory
+        # par défaut (environments/<env>), donc un chemin relatif à la racine du dépôt serait
+        # résolu depuis là et introuvable.
+        run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
 
       - name: terraform init
         run: terraform init
