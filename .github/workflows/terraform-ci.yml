@@ -61,6 +61,18 @@ jobs:
         with:
           terraform_wrapper: false
 
+      # modules/aws/secret-rotation référence son package Lambda via filebase64sha256(), donc le
+      # zip doit exister AVANT le plan — sinon Terraform échoue à l'évaluation, avant même de
+      # contacter le moindre fournisseur. Le zip est gitignoré à dessein (wheels binaires
+      # psycopg2, plusieurs Mo, reproductibles en une commande), il doit donc être reconstruit
+      # ici. Voir modules/aws/secret-rotation/lambda/README.md pour l'équivalent local.
+      #
+      # Contraintes de plateforme reprises telles quelles : sans --platform/--python-version, pip
+      # produirait une wheel pour le runner et non pour le runtime Lambda, avec une erreur
+      # d'import qui n'apparaîtrait qu'à la première rotation réelle.
+      - name: Build du package Lambda de rotation
+        run: bash modules/aws/secret-rotation/lambda/build.sh
+
       - name: terraform fmt -check
         run: terraform fmt -check -recursive
 
@@ -350,6 +362,12 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
+
+      # Même build que dans le job validate, et pour la même raison : le zip est gitignoré, donc
+      # absent d'un checkout frais. Sans lui, l'apply échoue à l'évaluation de filebase64sha256()
+      # avant de toucher quoi que ce soit — donc sans dégât, mais sans déploiement non plus.
+      - name: Build du package Lambda de rotation
+        run: bash modules/aws/secret-rotation/lambda/build.sh
 
       - name: terraform init
         run: terraform init

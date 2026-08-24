@@ -4,27 +4,35 @@
 
 Pourquoi ce n'est pas fait par Terraform via `local-exec` : ça rendrait `terraform plan` dépendant de la présence de `pip`/Docker sur la machine qui l'exécute — y compris le runner CI — ce qui casse plus souvent et plus discrètement qu'une commande de build documentée.
 
-## Construire (PowerShell, depuis ce dossier)
+## Construire
 
-```powershell
-# Nettoyer un build précédent
-Remove-Item -Recurse -Force .\build -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path .\build\package | Out-Null
+Une seule commande, un seul script — `build.sh`, également utilisé par la CI (`terraform-ci.yml`, jobs `validate` **et** `apply`). Ne pas réécrire ces étapes à la main ailleurs : deux chemins de build qui divergent produisent deux hashes différents, donc un flip-flop Terraform.
 
-# psycopg2-binary compilé pour le runtime Lambda (Amazon Linux 2023, x86_64, Python 3.12) —
-# PAS pour Windows : un `pip install` sans ces contraintes produirait une wheel inutilisable
-# sur Lambda, avec une erreur d'import qui n'apparaîtrait qu'à la première rotation.
-pip install `
-  --platform manylinux2014_x86_64 `
-  --implementation cp `
-  --python-version 3.12 `
-  --only-binary=:all: `
-  --target .\build\package `
-  psycopg2-binary
-
-Copy-Item .\rotate.py .\build\package\
-Compress-Archive -Path .\build\package\* -DestinationPath .\build\rotate.zip -Force
+```bash
+bash modules/aws/secret-rotation/lambda/build.sh
 ```
+
+Sous Windows, via Git Bash (`& "C:\Program Files\Git\bin\bash.exe" ...`). Le script affiche le SHA-256 du zip produit : **il doit être identique en local et en CI**. S'il diffère, le build a cessé d'être reproductible et Terraform verra la Lambda changer un apply sur deux.
+
+**Hash de référence** — avec `psycopg2-binary==2.9.10` et `rotate.py` dans son état actuel, construit sous Windows/Git Bash :
+
+```
+9628696840d3d64276d6cbbaebece7a56d2bcb51c9c0dfe8f968d23162900de0
+```
+
+Cette valeur doit changer **uniquement** quand `rotate.py` ou la version épinglée changent. Si elle bouge sans qu'aucun des deux n'ait été touché, la reproductibilité est cassée — chercher la cause plutôt que mettre à jour cette ligne.
+
+### Pourquoi un script plutôt que des commandes documentées
+
+Le module référence le zip via `filebase64sha256()`. Trois sources de non-déterminisme feraient varier ce hash sans qu'aucune ligne de code n'ait bougé, et le script les neutralise explicitement :
+
+| Source | Neutralisation |
+|---|---|
+| Version de `psycopg2-binary` résolue par pip | Épinglée exactement dans le script |
+| Dates de modification des fichiers | Normalisées à une date fixe avant l'archivage |
+| Ordre des fichiers et attributs de plateforme dans le zip | Liste triée + `zip -X` |
+
+Le bytecode `.pyc` est également supprimé : inutile à l'exécution, et son contenu varie.
 
 Le module lit `build/rotate.zip` par défaut (surchargeable via la variable `lambda_zip_path`).
 
