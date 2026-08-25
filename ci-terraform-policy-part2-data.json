@@ -1,0 +1,185 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LambdaRotationFunction",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunction",
+        "lambda:CreateFunction",
+        "lambda:DeleteFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:GetFunctionConfiguration",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:GetPolicy",
+        "lambda:ListVersionsByFunction",
+        "lambda:TagResource",
+        "lambda:UntagResource",
+        "lambda:ListTags"
+      ],
+      "Resource": "arn:aws:lambda:eu-west-1:386275436389:function:arkcloud-dev-*"
+    },
+    {
+      "Sid": "SecretsManager",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:UpdateSecret",
+        "secretsmanager:RotateSecret",
+        "secretsmanager:TagResource",
+        "secretsmanager:UntagResource",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:PutResourcePolicy"
+      ],
+      "Resource": "arn:aws:secretsmanager:eu-west-1:386275436389:secret:arkcloud-dev-*"
+    },
+    {
+      "Sid": "SnsAlertsTopic",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:Subscribe",
+        "sns:Unsubscribe",
+        "sns:ListSubscriptionsByTopic",
+        "sns:TagResource",
+        "sns:UntagResource"
+      ],
+      "Resource": "arn:aws:sns:eu-west-1:386275436389:arkcloud-dev-*"
+    },
+    {
+      "Sid": "CloudWatchObservability",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:PutMetricFilter",
+        "logs:DeleteMetricFilter",
+        "logs:DescribeMetricFilters",
+        "logs:TagLogGroup",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:ListTagsLogGroup",
+        "logs:ListTagsForResource",
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:PutDashboard",
+        "cloudwatch:DeleteDashboards",
+        "cloudwatch:GetDashboard",
+        "cloudwatch:ListDashboards",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource",
+        "cloudwatch:ListTagsForResource",
+        "events:DescribeRule",
+        "events:PutRule",
+        "events:DeleteRule",
+        "events:PutTargets",
+        "events:RemoveTargets",
+        "events:ListTargetsByRule",
+        "events:TagResource",
+        "events:UntagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudTrailAudit",
+      "Effect": "Allow",
+      "Action": [
+        "cloudtrail:CreateTrail",
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:UpdateTrail",
+        "cloudtrail:StartLogging",
+        "cloudtrail:StopLogging",
+        "cloudtrail:GetTrailStatus",
+        "cloudtrail:DescribeTrails",
+        "cloudtrail:GetTrail",
+        "cloudtrail:PutEventSelectors",
+        "cloudtrail:GetEventSelectors",
+        "cloudtrail:AddTags",
+        "cloudtrail:RemoveTags",
+        "cloudtrail:ListTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3CloudTrailBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:PutBucketPolicy",
+        "s3:GetBucketPolicy",
+        "s3:DeleteBucketPolicy",
+        "s3:PutEncryptionConfiguration",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutBucketVersioning",
+        "s3:GetBucketVersioning",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:PutBucketOwnershipControls",
+        "s3:GetBucketOwnershipControls",
+        "s3:PutBucketTagging",
+        "s3:GetBucketTagging"
+      ],
+      "Resource": "arn:aws:s3:::arkcloud-dev-*"
+    },
+    {
+      "Sid": "GuardDuty",
+      "Effect": "Allow",
+      "Action": [
+        "guardduty:CreateDetector",
+        "guardduty:DeleteDetector",
+        "guardduty:GetDetector",
+        "guardduty:UpdateDetector",
+        "guardduty:ListDetectors",
+        "guardduty:TagResource",
+        "guardduty:UntagResource",
+        "guardduty:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RdsPostgres",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:ModifyDBInstance",
+        "rds:DescribeDBInstances",
+        "rds:StopDBInstance",
+        "rds:StartDBInstance",
+        "rds:CreateDBSubnetGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:ModifyDBSubnetGroup",
+        "rds:DescribeDBSubnetGroups",
+        "rds:CreateDBParameterGroup",
+        "rds:DeleteDBParameterGroup",
+        "rds:ModifyDBParameterGroup",
+        "rds:DescribeDBParameterGroups",
+        "rds:DescribeDBParameters",
+        "rds:AddTagsToResource",
+        "rds:RemoveTagsFromResource",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:eu-west-1:386275436389:db:arkcloud-dev-*",
+        "arn:aws:rds:eu-west-1:386275436389:subgrp:arkcloud-dev-*",
+        "arn:aws:rds:eu-west-1:386275436389:pg:arkcloud-dev-*"
+      ]
+    }
+  ]
+}

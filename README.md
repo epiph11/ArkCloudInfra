@@ -540,6 +540,16 @@ Rotation elle-même toujours manuelle — l'automatiser proprement demanderait u
 | `POSTGRES_ADMIN_PASSWORD` | Secret GitHub (`ArkCloudInfra`) + `TF_VAR_postgres_admin_password` + Key Vault (`ConnectionStrings--DefaultConnection`) | Pas d'échéance dure — à tourner a minima à chaque changement de membre d'équipe ayant eu accès, ou tous les 6 mois en routine | Changer le mot de passe côté Azure (`az postgres flexible-server update` ou portail) d'abord — **pas** via un `terraform apply` direct : `administrator_password` est en `ignore_changes` (§postgresql module) exprès pour qu'un apply non lié ne touche jamais ce mot de passe par accident. Une fois changé côté Azure, mettre à jour le secret GitHub et le secret Key Vault en cohérence, puis redémarrer l'API. |
 | `Jwt:Key` | Key Vault (`Jwt--Key`), lu par `ArkCloud.API` | Pas d'échéance dure — rotation invalide tous les tokens actifs (pas de rotation à chaud possible avec une seule clé de signature), donc à faire hors heures de forte utilisation | Générer une nouvelle valeur aléatoire (64+ octets), `az keyvault secret set --name Jwt--Key --vault-name kv-arkcloud-dev`, redémarrer l'API. Effet de bord assumé : tous les utilisateurs connectés sont déloggés (access + refresh tokens signés avec l'ancienne clé deviennent invalides). |
 
+### `docker_registry_password` : diff perpétuel expliqué, volontairement non "fixé" (Sprint 6)
+
+Chaque `plan`/`apply` sur `module.app_service_api`/`module.app_service_web` affiche `~ docker_registry_password = (sensitive value)` en "update in-place", même quand rien n'a changé. Root-cause vérifiée (pas supposée) : l'API Azure ne renvoie jamais la valeur réelle d'un champ marqué sensible sur un `GET` — le provider AzureRM compare donc systématiquement la valeur configurée dans le `.tf` à une valeur vide/absente côté state, pas à l'ancienne valeur réelle. C'est une classe de bug documentée côté provider (issues GitHub `hashicorp/terraform-provider-azurerm` #22379, #22548, #23525, #23632 — déjà en partie corrigées pour `docker_registry_url`/`docker_registry_username`, jamais pour un champ sensible comme `docker_registry_password`, puisque le problème est l'API Azure elle-même, pas le provider).
+
+Deux options évaluées, toutes les deux écartées :
+- **`lifecycle { ignore_changes = [...] }` sur ce seul champ** — un fil de discussion HashiCorp confirme que `ignore_changes` sur une clé imbriquée dans `site_config`/`application_stack` ignore en pratique **tout le bloc**, pas juste la clé ciblée. Effet de bord inacceptable ici : ça bloquerait aussi la propagation d'un futur changement légitime de stack/app_settings.
+- **Ignorer le champ entièrement** — casserait la procédure de rotation `GHCR_PAT` documentée juste au-dessus (étape 3 : "relancer un `terraform apply` pour que le nouvel App Setting soit poussé"), qui dépend justement de ce que `docker_registry_password` soit réappliqué à chaque run.
+
+Décision : diff accepté tel quel, documenté plutôt que masqué. Il est cosmétique et sans risque — Terraform renvoie à chaque fois la vraie valeur courante (`var.ghcr_pat`), donc l'"update in-place" ne fait que re-confirmer un mot de passe déjà correct, jamais de downtime ni de credential invalide poussé par erreur.
+
 ### Rotation automatique des mots de passe Postgres (Sprint 6)
 
 Les deux mots de passe Postgres tournent maintenant **tout seuls tous les 90 jours**, sur les deux clouds, sans intervention. Même politique, deux mécanismes différents parce que les plateformes ne proposent pas la même chose :
@@ -579,9 +589,9 @@ Revue systématique de toutes les identités créées par ce repo (rôles IAM AW
 | `modules/azure/secret-rotation` (runbook rotation, étape 1) | `Contributor` sur le serveur Postgres | Rôle personnalisé : `.../flexibleServers/{read,write}` | PATCH sur `administratorLoginPassword` — `write` reste nécessaire car Azure RBAC ne distingue pas les champs à l'intérieur d'un PATCH, mais `delete` et tout le reste disparaissent |
 | `modules/azure/secret-rotation` (runbook rotation, étape 3) | `Contributor` sur l'App Service | Rôle personnalisé : `.../sites/{read,restart/action}` | `POST /restart`, rien d'autre — pas d'accès à la config, l'image conteneur ou les app settings |
 
-**Trouvé, pas corrigeable par Terraform — action manuelle requise** :
+**Trouvé et corrigé manuellement (hors Terraform, actions `az`/`aws` CLI par le user)** :
 
-- **Rôle CI Azure AD (`github-arkcloudinfra`, README §6) : `Contributor` sur toute la souscription**, pas sur `rg-arkcloud-dev` — la sur-permission la plus significative du repo. Ce pipeline ne gère qu'un seul resource group ; un `Contributor` souscription-wide peut créer/modifier/supprimer absolument tout, y compris des ressources hors du périmètre de ce projet. À corriger une fois, en local :
+- **Rôle CI Azure AD (`github-arkcloudinfra`, README §6) : `Contributor` sur toute la souscription**, pas sur `rg-arkcloud-dev` — la sur-permission la plus significative du repo côté Azure. Corrigé :
 
   ```powershell
   $appId = "63df2a4f-1129-424e-b6cf-b6c6613bc022"
@@ -593,16 +603,22 @@ Revue systématique de toutes les identités créées par ce repo (rôles IAM AW
     --scope "/subscriptions/$subId/resourceGroups/rg-arkcloud-dev"
   ```
 
-  `Storage Blob Data Contributor` sur `arkcloudstatestore` reste inchangé — déjà correctement scopé. Compromis à connaître : quand `environments/staging`/`prod` existeront, chacun aura besoin de sa propre assignation `Contributor` scopée à son propre resource group — le confort d'un scope souscription (couvrir automatiquement tout futur RG) est précisément ce qu'on retire ici, en échange d'un vrai périmètre.
+  `Storage Blob Data Contributor` sur `arkcloudstatestore` reste inchangé — déjà correctement scopé. Compromis connu : quand `environments/staging`/`prod` existeront, chacun aura besoin de sa propre assignation `Contributor` scopée à son propre resource group — le confort d'un scope souscription (couvrir automatiquement tout futur RG) est précisément ce qu'on a retiré ici, en échange d'un vrai périmètre.
 
-- **Rôle IAM AWS `arkcloudinfra-ci` (référencé dans `terraform-ci.yml`, jamais documenté dans ce repo)** — l'identité la plus puissante du dispositif AWS (elle fait tourner `terraform apply` sur `environments/dev`, y compris la création de rôles IAM) n'a sa policy tracée nulle part ici, contrairement au rôle ECR-push (`trust-policy.json`/`ecr-push-policy.json`, bien documenté et scopé). Avant de pouvoir la resserrer, il faut d'abord savoir ce qu'elle autorise aujourd'hui :
+- **Rôle IAM AWS `arkcloudinfra-ci` : `AdministratorAccess`** — pire que "non documenté" : l'identité qui fait tourner `terraform apply` sur `environments/dev` avait un accès admin complet au compte AWS, sans aucun rapport avec ce qu'elle gère réellement. Corrigé en deux policies IAM personnalisées, construites à partir d'un inventaire réel des 47 types de ressources `aws_*` que ce Terraform gère (pas deviné) — une seule policy dépassait la limite AWS de 6144 caractères (customer-managed policy), d'où le split :
+  - `ci-terraform-policy-part1-compute.json` — EC2/réseau, ELB, ACM, ECR, ECS, IAM (création des rôles ECS/Lambda + `PassRole` scopé à `ecs-tasks.amazonaws.com`/`lambda.amazonaws.com` uniquement)
+  - `ci-terraform-policy-part2-data.json` — Lambda (rotation), Secrets Manager, SNS, CloudWatch/EventBridge, CloudTrail, S3 (bucket CloudTrail), GuardDuty, RDS
+
+  Scope par ARN sur le préfixe `arkcloud-dev-*` et le compte `386275436389` partout où AWS le permet (ECR, IAM, Lambda, Secrets Manager, SNS, RDS, S3) ; wildcard uniquement là où AWS ne supporte pas de permissions au niveau ressource pour ces actions (réseau EC2, ELB, ACM, ECS, GuardDuty, CloudTrail, CloudWatch/EventBridge).
 
   ```powershell
-  aws iam get-role --role-name arkcloudinfra-ci
-  aws iam list-attached-role-policies --role-name arkcloudinfra-ci
-  aws iam list-role-policies --role-name arkcloudinfra-ci
+  aws iam create-policy --policy-name arkcloudinfra-ci-compute --policy-document file://ci-terraform-policy-part1-compute.json
+  aws iam create-policy --policy-name arkcloudinfra-ci-data --policy-document file://ci-terraform-policy-part2-data.json
+  aws iam attach-role-policy --role-name arkcloudinfra-ci --policy-arn arn:aws:iam::386275436389:policy/arkcloudinfra-ci-compute
+  aws iam attach-role-policy --role-name arkcloudinfra-ci --policy-arn arn:aws:iam::386275436389:policy/arkcloudinfra-ci-data
+  aws iam detach-role-policy --role-name arkcloudinfra-ci --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
   ```
 
-  Coller le résultat ici pour la suite de l'audit — pas de recommandation de policy tant que le contenu réel n'est pas connu, dans le même esprit que chaque décision de ce repo vérifiée contre une preuve plutôt que supposée.
+  Vérifié par un `terraform plan` complet, propre, **après** avoir détaché `AdministratorAccess` (pas juste testé en parallèle) : `0 to add, 2 to change, 0 to destroy` — les deux seuls changements sont le diff `docker_registry_password` déjà documenté ci-dessus, aucune erreur `AccessDenied`. La policy admin a été retirée pour de bon, rien n'en dépendait.
 
 **Ce qui reste manuel malgré le rappel automatique** : le check ne fait qu'alerter (job rouge dans l'onglet Actions, + email GitHub par défaut aux personnes qui watchent le repo) — il ne tourne aucun secret lui-même. Après chaque rotation réelle, mettre à jour `.github/secrets-inventory.json` (`expires_on` pour `GHCR_PAT`, `last_rotated` pour les deux mots de passe Postgres et `Jwt:Key`) — sinon le check continuera de réclamer une rotation déjà effectuée à la prochaine échéance. Pas encore fait, volontairement : une vraie automatisation de la rotation elle-même pour `POSTGRES_ADMIN_PASSWORD` (Azure via Automation Runbook, AWS via rotation native Secrets Manager) — candidat naturel pour la suite du Sprint 6.
