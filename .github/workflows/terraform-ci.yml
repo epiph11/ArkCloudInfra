@@ -17,6 +17,12 @@ on:
       - "environments/**"
       - ".github/workflows/terraform-ci.yml"
       - ".tflint.hcl"
+  # Déclenchement manuel — pas soumis aux filtres de paths ci-dessus, utile pour revalider après
+  # un changement qui ne touche aucun de ces chemins (ex. mise à jour d'une policy IAM AWS via
+  # `aws iam create-policy-version` ou d'un rôle Azure via `az role definition create`, comme le
+  # 25/08 — ces changements vivent hors de modules/environments donc ne redéclenchent rien tout
+  # seuls). Même besoin, même solution que arkcloud-backend-ci.yml côté ArkCloud.
+  workflow_dispatch:
 
 permissions:
   id-token: write   # nécessaire pour qu'Azure AD délivre un jeton OIDC à ce run
