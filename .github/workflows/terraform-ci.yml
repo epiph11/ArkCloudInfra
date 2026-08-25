@@ -48,10 +48,10 @@ jobs:
 
       # Sprint 5 — same OIDC pattern as Azure just above: no static AWS access key stored,
       # this action exchanges the job's GitHub OIDC token for temporary credentials by
-      # assuming arkcloudinfra-ci (trust policy scoped to this repo, see README §11 — policy
-      # actuelle non documentée dans ce repo, signalé comme lacune de gouvernance lors de
-      # l'audit IAM Sprint 6, à corriger). The
-      # provider "aws" block in providers.tf has no explicit credentials config — it just
+      # assuming arkcloudinfra-ci (trust policy scoped to this repo). Policy resserrée lors de
+      # l'audit IAM Sprint 6 — AdministratorAccess retiré, remplacé par deux policies IAM
+      # documentées (ci-terraform-policy-part1-compute.json / -part2-data.json), voir README §11.
+      # The provider "aws" block in providers.tf has no explicit credentials config — it just
       # picks up the AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY/SESSION_TOKEN env vars this step sets.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -426,3 +426,123 @@ jobs:
 
       - name: terraform apply
         run: terraform apply -auto-approve -input=false
+
+  # Sprint 6 fitness function (coût) — voir docs/infra-roadmap.md (ArkCloud repo) Step 18.7 et
+  # README.md §"Sprint 6 — Fitness functions". Détecte une dérive de coût AVANT l'apply, pas
+  # après la facture — même principe que le cost-guard runtime (budget 7 €/mois côté Azure),
+  # mais appliqué au moment du plan plutôt qu'en continu sur l'infra déjà déployée.
+  #
+  # Job séparé de `validate`, volontairement : il ne bloque ni `validate` ni `apply` s'il échoue
+  # ou si INFRACOST_API_KEY n'est pas encore configuré (`if: env.INFRACOST_API_KEY != ''` sur
+  # chaque step le laisse simplement ne rien faire plutôt que planter tout le workflow). Ne tourne
+  # que sur pull_request — comparer à la branche de base n'a de sens que là, et c'est le seul
+  # événement où un commentaire de PR a une destination.
+  #
+  # Nécessite un secret INFRACOST_API_KEY (gratuit) : créer un compte sur infracost.io/dashboard,
+  # `infracost auth login` en local pour récupérer la clé, puis
+  # `gh secret set INFRACOST_API_KEY --repo epiph11/ArkCloudInfra`. Sans ce secret, le job entier
+  # est un no-op silencieux (voir garde ci-dessous), donc rien ne casse tant qu'il n'est pas posé.
+  infracost:
+    name: Fitness function — coût (infracost)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+      TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
+      TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+      TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
+      TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      # Delta max toléré avant que la PR soit bloquée : 20 $/mois. Ordre de grandeur choisi contre
+      # le budget Azure existant (7 €/mois, cost-guard) — un seul changement ne devrait jamais
+      # ajouter plus que ça au coût mensuel sans qu'un humain le voie explicitement passer.
+      # Les baisses de coût ne sont jamais bloquées, seulement les hausses au-delà du seuil.
+      MAX_MONTHLY_COST_INCREASE_USD: 20
+    steps:
+      - name: Setup Infracost
+        if: env.INFRACOST_API_KEY != ''
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Configure AWS credentials
+        if: env.INFRACOST_API_KEY != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - uses: hashicorp/setup-terraform@v3
+        if: env.INFRACOST_API_KEY != ''
+        with:
+          terraform_wrapper: false
+
+      - name: Checkout base branch
+        if: env.INFRACOST_API_KEY != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      # Même raison que dans le job validate : filebase64sha256() sur le zip Lambda doit pouvoir
+      # résoudre un fichier réel dès l'évaluation du plan, y compris pour le breakdown de la
+      # branche de base.
+      - name: Build du package Lambda de rotation (base)
+        if: env.INFRACOST_API_KEY != ''
+        run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+
+      - name: Infracost — coût de base (branche cible de la PR)
+        if: env.INFRACOST_API_KEY != ''
+        run: |
+          infracost breakdown --path=environments/dev \
+                               --format=json \
+                               --out-file=/tmp/infracost-base.json
+
+      - name: Checkout PR branch
+        if: env.INFRACOST_API_KEY != ''
+        uses: actions/checkout@v4
+
+      - name: Build du package Lambda de rotation (PR)
+        if: env.INFRACOST_API_KEY != ''
+        run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+
+      - name: Infracost diff
+        if: env.INFRACOST_API_KEY != ''
+        run: |
+          infracost diff --path=environments/dev \
+                          --format=json \
+                          --compare-to=/tmp/infracost-base.json \
+                          --out-file=/tmp/infracost.json
+
+      - name: Post Infracost comment
+        if: env.INFRACOST_API_KEY != ''
+        run: |
+          infracost comment github --path=/tmp/infracost.json \
+                                   --repo=$GITHUB_REPOSITORY \
+                                   --github-token=${{ github.token }} \
+                                   --pull-request=${{ github.event.pull_request.number }} \
+                                   --behavior=update
+
+      # Le vrai gate — pas via Infracost Cloud/Cost Policies (payant), juste jq sur la sortie
+      # JSON de la CLI open source. diffTotalMonthlyCost est déjà négatif ou nul pour une baisse
+      # de coût ; seule une hausse au-delà du seuil fait échouer le job.
+      - name: Vérifier le budget (échoue si hausse > seuil)
+        if: env.INFRACOST_API_KEY != ''
+        run: |
+          DIFF=$(jq -r '.diffTotalMonthlyCost // "0"' /tmp/infracost.json)
+          echo "Delta de coût mensuel estimé : \$${DIFF}"
+          # bash ne fait pas de comparaison flottante nativement, et bc n'est pas garanti présent
+          # sur le runner — python3, lui, l'est toujours sur ubuntu-latest.
+          python3 -c "
+          import sys
+          diff = float('$DIFF')
+          threshold = float('$MAX_MONTHLY_COST_INCREASE_USD')
+          if diff > threshold:
+              print(f'::error::Cette PR augmente le cout mensuel estime de \${diff:.2f}, au-dessus du seuil de \${threshold:.2f}. Verifier le commentaire Infracost sur la PR, et augmenter ce seuil explicitement (avec justification) si la hausse est voulue.')
+              sys.exit(1)
+          "
