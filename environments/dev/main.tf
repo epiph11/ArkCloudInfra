@@ -492,6 +492,7 @@ module "azure_secret_rotation" {
   source = "../../modules/azure/secret-rotation"
 
   resource_group_name = module.resource_group.name
+  resource_group_id   = module.resource_group.id
   location            = var.location
   name_prefix         = "arkcloud-${var.environment}"
 

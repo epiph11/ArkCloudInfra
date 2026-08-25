@@ -39,26 +39,79 @@ resource "azurerm_automation_account" "rotation" {
   tags = var.tags
 }
 
-# Three separate least-privilege assignments rather than one broad Contributor on the resource
-# group — each scoped to exactly the one resource the runbook touches.
+# Audit IAM (Sprint 6) : les deux "Contributor" d'origine ci-dessous ont été remplacés par des
+# rôles personnalisés. "Contributor" scopé à une seule ressource limite bien le *rayon d'action*
+# (ce serveur/cet App Service précis, rien d'autre), mais pas les *actions permises dessus* — il
+# autorise resize, suppression, changement de réseau, etc., alors que le runbook ci-dessus ne
+# fait jamais qu'un PATCH sur le mot de passe et un POST /restart. Vérifié contre la liste
+# officielle des opérations RBAC (learn.microsoft.com/.../permissions/databases et
+# .../web-and-mobile) avant d'écrire les actions ci-dessous — pas supposées.
+#
+# Le cas Postgres reste imparfait par construction de l'API Azure, pas par manque de rigueur ici :
+# le changement de mot de passe passe par un PATCH générique sur la ressource entière
+# (properties.administratorLoginPassword), et Azure RBAC n'expose pas d'action distincte pour
+# "changer seulement le mot de passe" — le contrôle d'accès s'arrête au niveau de l'opération
+# HTTP (write), pas du champ modifié dans le corps de la requête. `write` reste donc nécessaire,
+# mais ce rôle personnalisé retire déjà ce que "Contributor" ajoutait sans rapport avec ce besoin :
+# delete, et surtout le fait que "Contributor" est un rôle générique qui s'applique à TOUT type de
+# ressource Azure — un rôle personnalisé limité aux deux actions ci-dessous ne peut, par
+# construction, jamais rien faire d'autre que lire/écrire un serveur PostgreSQL Flexible.
+resource "azurerm_role_definition" "postgres_password_rotate" {
+  name        = "arkcloud-${var.name_prefix}-postgres-password-rotate"
+  scope       = var.resource_group_id
+  description = "Lecture + écriture d'un serveur PostgreSQL Flexible Server — suffisant pour y changer le mot de passe admin via PATCH, rien de plus (pas de delete, pas d'accès à un autre type de ressource)."
+
+  permissions {
+    actions = [
+      "Microsoft.DBforPostgreSQL/flexibleServers/read",
+      "Microsoft.DBforPostgreSQL/flexibleServers/write",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [var.resource_group_id]
+}
+
 resource "azurerm_role_assignment" "rotation_postgres" {
-  scope                = var.postgres_server_id
-  role_definition_name = "Contributor"
-  principal_id         = azurerm_automation_account.rotation.identity[0].principal_id
+  scope              = var.postgres_server_id
+  role_definition_id = azurerm_role_definition.postgres_password_rotate.role_definition_resource_id
+  principal_id       = azurerm_automation_account.rotation.identity[0].principal_id
 }
 
 # "Secrets Officer" (write), not "Secrets User" (read) — the API's identity only reads; this
-# runbook has to overwrite the connection string after each rotation.
+# runbook has to overwrite the connection string after each rotation. Déjà le rôle intégré le
+# plus étroit possible pour ce besoin (Azure RBAC pour Key Vault ne descend pas au niveau d'un
+# secret individuel) — pas de rôle personnalisé nécessaire ici, contrairement aux deux autres.
 resource "azurerm_role_assignment" "rotation_key_vault" {
   scope                = var.key_vault_id
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = azurerm_automation_account.rotation.identity[0].principal_id
 }
 
+# Ici, en revanche, une action RBAC dédiée existe vraiment (contrairement au cas Postgres
+# ci-dessus) : Microsoft.Web/sites/restart/action. Le rôle personnalisé exclut donc complètement
+# "write" — cette identité ne peut ni changer la configuration de l'App Service (app settings,
+# image conteneur, réseau) ni la supprimer, seulement lire son état et la redémarrer.
+resource "azurerm_role_definition" "app_service_restart" {
+  name        = "arkcloud-${var.name_prefix}-app-service-restart"
+  scope       = var.resource_group_id
+  description = "Lecture + redémarrage d'un App Service — rien d'autre : pas d'écriture sur la config, l'image conteneur ou les app settings."
+
+  permissions {
+    actions = [
+      "Microsoft.Web/sites/read",
+      "Microsoft.Web/sites/restart/action",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [var.resource_group_id]
+}
+
 resource "azurerm_role_assignment" "rotation_app_service" {
-  scope                = var.app_service_id
-  role_definition_name = "Contributor"
-  principal_id         = azurerm_automation_account.rotation.identity[0].principal_id
+  scope              = var.app_service_id
+  role_definition_id = azurerm_role_definition.app_service_restart.role_definition_resource_id
+  principal_id       = azurerm_automation_account.rotation.identity[0].principal_id
 }
 
 resource "azurerm_automation_runbook" "rotate_postgres_password" {

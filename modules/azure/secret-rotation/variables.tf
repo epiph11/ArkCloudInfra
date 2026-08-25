@@ -2,6 +2,11 @@ variable "resource_group_name" {
   type = string
 }
 
+variable "resource_group_id" {
+  description = "Scope/assignable_scopes des deux rôles Azure personnalisés définis dans ce module (voir main.tf) — les garde visibles et assignables uniquement à l'intérieur de ce resource group, jamais au niveau subscription."
+  type        = string
+}
+
 variable "location" {
   type = string
 }

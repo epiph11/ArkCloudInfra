@@ -565,4 +565,44 @@ Leçon générale, gardée telle quelle pour la suite : la preuve de reproductib
 
 **Toujours pas automatisé, volontairement** : `Jwt:Key` (chaque rotation invalide tous les tokens actifs — `ArkCloud.API` n'a pas de support multi-clés `kid` pour basculer en douceur) et `GHCR_PAT` (token GitHub personnel, aucune API cloud ne peut le faire tourner ; il faudrait une GitHub App). Ces deux-là restent sur la procédure manuelle ci-dessus + le rappel d'échéance.
 
+## 11. Audit IAM moindre-privilège (Sprint 6)
+
+Revue systématique de toutes les identités créées par ce repo (rôles IAM AWS, role assignments Azure) : pour chacune, le principal qui l'assume, les permissions exactes accordées, le scope exact, et si ces permissions correspondent à ce que le code appelle réellement (vérifié ligne à ligne contre `rotate.py`, les runbooks PowerShell, etc. — pas supposé).
+
+**Déjà correct, confirmé plutôt que juste espéré** : les rôles IAM ECS (`modules/aws/ecs`), le rôle de la Lambda de rotation AWS (`modules/aws/secret-rotation` — la policy correspond exactement aux appels `boto3` réellement faits dans `rotate.py`), le rôle CloudTrail→CloudWatch Logs, l'assignation Key Vault de l'API (`modules/azure/identity`, lecture seule), et l'assignation "Key Vault Secrets Officer" du runbook de rotation Azure (déjà le rôle intégré le plus étroit possible — Azure RBAC ne descend pas au niveau d'un secret individuel).
+
+**Corrigé dans ce sprint** — trois assignations Azure utilisaient `Contributor` scopé à une seule ressource : ça limitait bien le *rayon d'action* (cette ressource précise, jamais la resource group), mais pas les *actions permises dessus* (resize, suppression, changement réseau — bien plus que ce que chaque runbook fait réellement). Remplacées par des rôles Azure personnalisés (`azurerm_role_definition`), chacun limité aux actions RBAC exactes utilisées, vérifiées contre la liste officielle des opérations (`learn.microsoft.com/.../permissions/databases` et `.../web-and-mobile`) avant d'être écrites :
+
+| Identité | Avant | Après | Ce que le code fait réellement |
+|---|---|---|---|
+| `modules/azure/cost-guard` (runbook stop) | `Contributor` sur le serveur Postgres | Rôle personnalisé : `.../flexibleServers/{read,stop/action}` | `Stop-AzPostgresFlexibleServer`, rien d'autre — pas même le redémarrage (fait à la main par un humain) |
+| `modules/azure/secret-rotation` (runbook rotation, étape 1) | `Contributor` sur le serveur Postgres | Rôle personnalisé : `.../flexibleServers/{read,write}` | PATCH sur `administratorLoginPassword` — `write` reste nécessaire car Azure RBAC ne distingue pas les champs à l'intérieur d'un PATCH, mais `delete` et tout le reste disparaissent |
+| `modules/azure/secret-rotation` (runbook rotation, étape 3) | `Contributor` sur l'App Service | Rôle personnalisé : `.../sites/{read,restart/action}` | `POST /restart`, rien d'autre — pas d'accès à la config, l'image conteneur ou les app settings |
+
+**Trouvé, pas corrigeable par Terraform — action manuelle requise** :
+
+- **Rôle CI Azure AD (`github-arkcloudinfra`, README §6) : `Contributor` sur toute la souscription**, pas sur `rg-arkcloud-dev` — la sur-permission la plus significative du repo. Ce pipeline ne gère qu'un seul resource group ; un `Contributor` souscription-wide peut créer/modifier/supprimer absolument tout, y compris des ressources hors du périmètre de ce projet. À corriger une fois, en local :
+
+  ```powershell
+  $appId = "63df2a4f-1129-424e-b6cf-b6c6613bc022"
+  $subId = "dd810534-1452-4967-95ed-cf2de0fd5816"
+
+  az role assignment delete --assignee $appId --role "Contributor" --scope "/subscriptions/$subId"
+
+  az role assignment create --assignee $appId --role "Contributor" `
+    --scope "/subscriptions/$subId/resourceGroups/rg-arkcloud-dev"
+  ```
+
+  `Storage Blob Data Contributor` sur `arkcloudstatestore` reste inchangé — déjà correctement scopé. Compromis à connaître : quand `environments/staging`/`prod` existeront, chacun aura besoin de sa propre assignation `Contributor` scopée à son propre resource group — le confort d'un scope souscription (couvrir automatiquement tout futur RG) est précisément ce qu'on retire ici, en échange d'un vrai périmètre.
+
+- **Rôle IAM AWS `arkcloudinfra-ci` (référencé dans `terraform-ci.yml`, jamais documenté dans ce repo)** — l'identité la plus puissante du dispositif AWS (elle fait tourner `terraform apply` sur `environments/dev`, y compris la création de rôles IAM) n'a sa policy tracée nulle part ici, contrairement au rôle ECR-push (`trust-policy.json`/`ecr-push-policy.json`, bien documenté et scopé). Avant de pouvoir la resserrer, il faut d'abord savoir ce qu'elle autorise aujourd'hui :
+
+  ```powershell
+  aws iam get-role --role-name arkcloudinfra-ci
+  aws iam list-attached-role-policies --role-name arkcloudinfra-ci
+  aws iam list-role-policies --role-name arkcloudinfra-ci
+  ```
+
+  Coller le résultat ici pour la suite de l'audit — pas de recommandation de policy tant que le contenu réel n'est pas connu, dans le même esprit que chaque décision de ce repo vérifiée contre une preuve plutôt que supposée.
+
 **Ce qui reste manuel malgré le rappel automatique** : le check ne fait qu'alerter (job rouge dans l'onglet Actions, + email GitHub par défaut aux personnes qui watchent le repo) — il ne tourne aucun secret lui-même. Après chaque rotation réelle, mettre à jour `.github/secrets-inventory.json` (`expires_on` pour `GHCR_PAT`, `last_rotated` pour les deux mots de passe Postgres et `Jwt:Key`) — sinon le check continuera de réclamer une rotation déjà effectuée à la prochaine échéance. Pas encore fait, volontairement : une vraie automatisation de la rotation elle-même pour `POSTGRES_ADMIN_PASSWORD` (Azure via Automation Runbook, AWS via rotation native Secrets Manager) — candidat naturel pour la suite du Sprint 6.

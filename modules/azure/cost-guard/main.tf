@@ -35,13 +35,37 @@ resource "azurerm_automation_account" "cost_guard" {
   tags = var.tags
 }
 
-# Least-privilege: Contributor scoped to exactly the Postgres server resource, not the
-# resource group — mirrors the AWS IAM least-privilege pattern used elsewhere (e.g. the ECS
-# task role in modules/aws/ecs only ever gets scoped access to its own secrets, never the RG).
+# Audit IAM (Sprint 6) : "Contributor" scopé au serveur précis limitait déjà le *rayon d'action*
+# (mirrors the AWS IAM least-privilege pattern used elsewhere), mais pas les *actions permises*
+# sur cette ressource — le runbook ci-dessous ne fait jamais qu'un Stop-AzPostgresFlexibleServer,
+# alors que "Contributor" autorise aussi resize, suppression, changement réseau, etc. Remplacé
+# par un rôle personnalisé limité à lire l'état + l'arrêter — vérifié contre la liste officielle
+# des opérations RBAC (learn.microsoft.com/.../permissions/databases) avant d'écrire l'action.
+# Volontairement PAS de "start/action" ici : ce runbook n'existe que pour couper les coûts,
+# jamais pour redémarrer — le message affiché en fin de script pointe vers `az postgres
+# flexible-server start` exécuté par un humain avec ses propres identifiants, pas par cette
+# identité automatisée. Ajouter start reviendrait à donner à ce compte un pouvoir qu'il n'exerce
+# jamais dans le code.
+resource "azurerm_role_definition" "postgres_stop" {
+  name        = "arkcloud-${var.name_prefix}-postgres-stop"
+  scope       = var.resource_group_id
+  description = "Lecture + arrêt d'un serveur PostgreSQL Flexible Server — rien d'autre, pas même le redémarrage."
+
+  permissions {
+    actions = [
+      "Microsoft.DBforPostgreSQL/flexibleServers/read",
+      "Microsoft.DBforPostgreSQL/flexibleServers/stop/action",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [var.resource_group_id]
+}
+
 resource "azurerm_role_assignment" "cost_guard_stop_postgres" {
-  scope                = var.postgres_server_id
-  role_definition_name = "Contributor"
-  principal_id         = azurerm_automation_account.cost_guard.identity[0].principal_id
+  scope              = var.postgres_server_id
+  role_definition_id = azurerm_role_definition.postgres_stop.role_definition_resource_id
+  principal_id       = azurerm_automation_account.cost_guard.identity[0].principal_id
 }
 
 resource "azurerm_automation_runbook" "stop_postgres" {

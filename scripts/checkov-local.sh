@@ -26,8 +26,16 @@ fi
 # que de dupliquer la liste ici — sinon les deux listes divergent tôt ou tard, exactement le
 # genre de double source de vérité qu'on a appris à éviter ce sprint (voir le commentaire sur
 # aws_sns_topic_policy.alerts dans environments/dev/main.tf pour un autre exemple du même principe).
+#
+# tr -d '\n ' supprime les retours à la ligne ET tous les espaces en un seul passage — pas juste
+# les compresser ou trimmer les extrémités. Bug réel rencontré avec une version plus prudente de
+# cette ligne (squeeze + trim des bords seulement) : chaque ID qui commençait une nouvelle ligne
+# dans le YAML gardait un espace devant (" CKV_AZURE_189" au lieu de "CKV_AZURE_189"), Checkov
+# comparait la chaîne telle quelle, l'ID ne matchait jamais, et la moitié des skips de la CI ne
+# s'appliquait pas en local — silencieusement, en faisant échouer des checks déjà arbitrés.
+# Aucun ID de check Checkov ne contient d'espace, donc les supprimer tous est toujours sûr ici.
 SKIP_CHECK=$(awk '/skip_check: >-/{flag=1; next} /^\s*- name:/{flag=0} flag' "$WORKFLOW_FILE" \
-  | tr -d '\n' | tr -s ' ' | sed 's/^ *//;s/ *$//')
+  | tr -d '\n ')
 
 if [ -z "$SKIP_CHECK" ]; then
   echo "Impossible d'extraire skip_check depuis $WORKFLOW_FILE — vérifier que le format n'a" >&2
@@ -40,7 +48,13 @@ echo "Environnement : environments/$ENVIRONMENT"
 echo "Skip check    : $SKIP_CHECK"
 echo
 
-docker run --rm \
+# MSYS_NO_PATHCONV=1 : sous Git Bash (Windows), MSYS traduit automatiquement tout argument
+# commençant par "/" en chemin Windows avant de l'exécuter — y compris "/tf" ci-dessous, qui
+# doit rester un chemin LITTÉRAL à l'intérieur du conteneur Linux, pas un chemin de l'hôte.
+# Sans ça, "-w /tf" devient quelque chose comme "C:/Program Files/Git/tf" et docker échoue
+# avec "the working directory ... is invalid". Sans effet sous Linux/macOS (variable
+# simplement ignorée), donc sûr de laisser toujours actif plutôt que de le conditionner à l'OS.
+MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$PWD:/tf" \
   -w /tf \
   "$CHECKOV_IMAGE" \
