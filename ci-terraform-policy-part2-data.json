@@ -17,7 +17,8 @@
         "lambda:ListVersionsByFunction",
         "lambda:TagResource",
         "lambda:UntagResource",
-        "lambda:ListTags"
+        "lambda:ListTags",
+        "lambda:GetFunctionCodeSigningConfig"
       ],
       "Resource": "arn:aws:lambda:eu-west-1:386275436389:function:*"
     },
@@ -50,7 +51,8 @@
         "sns:Unsubscribe",
         "sns:ListSubscriptionsByTopic",
         "sns:TagResource",
-        "sns:UntagResource"
+        "sns:UntagResource",
+        "sns:ListTagsForResource"
       ],
       "Resource": "arn:aws:sns:eu-west-1:386275436389:*"
     },
@@ -116,25 +118,19 @@
       "Sid": "S3CloudTrailBucket",
       "Effect": "Allow",
       "Action": [
+        "s3:Get*",
+        "s3:List*",
         "s3:CreateBucket",
         "s3:DeleteBucket",
-        "s3:ListBucket",
-        "s3:GetBucketLocation",
         "s3:PutBucketPolicy",
-        "s3:GetBucketPolicy",
         "s3:DeleteBucketPolicy",
         "s3:PutEncryptionConfiguration",
-        "s3:GetEncryptionConfiguration",
         "s3:PutBucketVersioning",
-        "s3:GetBucketVersioning",
         "s3:PutLifecycleConfiguration",
-        "s3:GetLifecycleConfiguration",
         "s3:PutBucketPublicAccessBlock",
-        "s3:GetBucketPublicAccessBlock",
         "s3:PutBucketOwnershipControls",
-        "s3:GetBucketOwnershipControls",
         "s3:PutBucketTagging",
-        "s3:GetBucketTagging"
+        "s3:PutBucketAcl"
       ],
       "Resource": "arn:aws:s3:::*",
       "Condition": {
