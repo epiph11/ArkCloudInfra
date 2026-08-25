@@ -19,7 +19,7 @@
         "lambda:UntagResource",
         "lambda:ListTags"
       ],
-      "Resource": "arn:aws:lambda:eu-west-1:386275436389:function:arkcloud-dev-*"
+      "Resource": "arn:aws:lambda:eu-west-1:386275436389:function:*"
     },
     {
       "Sid": "SecretsManager",
@@ -36,7 +36,7 @@
         "secretsmanager:GetResourcePolicy",
         "secretsmanager:PutResourcePolicy"
       ],
-      "Resource": "arn:aws:secretsmanager:eu-west-1:386275436389:secret:arkcloud-dev-*"
+      "Resource": "arn:aws:secretsmanager:eu-west-1:386275436389:secret:*"
     },
     {
       "Sid": "SnsAlertsTopic",
@@ -52,7 +52,7 @@
         "sns:TagResource",
         "sns:UntagResource"
       ],
-      "Resource": "arn:aws:sns:eu-west-1:386275436389:arkcloud-dev-*"
+      "Resource": "arn:aws:sns:eu-west-1:386275436389:*"
     },
     {
       "Sid": "CloudWatchObservability",
@@ -87,7 +87,8 @@
         "events:RemoveTargets",
         "events:ListTargetsByRule",
         "events:TagResource",
-        "events:UntagResource"
+        "events:UntagResource",
+        "events:ListTagsForResource"
       ],
       "Resource": "*"
     },
@@ -135,7 +136,12 @@
         "s3:PutBucketTagging",
         "s3:GetBucketTagging"
       ],
-      "Resource": "arn:aws:s3:::arkcloud-dev-*"
+      "Resource": "arn:aws:s3:::*",
+      "Condition": {
+        "StringEquals": {
+          "s3:ResourceAccount": "386275436389"
+        }
+      }
     },
     {
       "Sid": "GuardDuty",
@@ -175,11 +181,7 @@
         "rds:RemoveTagsFromResource",
         "rds:ListTagsForResource"
       ],
-      "Resource": [
-        "arn:aws:rds:eu-west-1:386275436389:db:arkcloud-dev-*",
-        "arn:aws:rds:eu-west-1:386275436389:subgrp:arkcloud-dev-*",
-        "arn:aws:rds:eu-west-1:386275436389:pg:arkcloud-dev-*"
-      ]
+      "Resource": "arn:aws:rds:eu-west-1:386275436389:*"
     }
   ]
 }

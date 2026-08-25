@@ -61,7 +61,9 @@
         "ec2:CreateTags",
         "ec2:DeleteTags",
         "ec2:DescribeTags",
-        "ec2:DescribeNetworkInterfaces"
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeAddressesAttribute",
+        "ec2:DescribePrefixLists"
       ],
       "Resource": "*",
       "Condition": {
@@ -129,7 +131,7 @@
         "ecr:UntagResource",
         "ecr:ListTagsForResource"
       ],
-      "Resource": "arn:aws:ecr:eu-west-1:386275436389:repository/arkcloud-dev-*"
+      "Resource": "arn:aws:ecr:eu-west-1:386275436389:repository/*"
     },
     {
       "Sid": "EcsCluster",
@@ -174,13 +176,13 @@
         "iam:UntagRole",
         "iam:ListRoleTags"
       ],
-      "Resource": "arn:aws:iam::386275436389:role/arkcloud-dev-*"
+      "Resource": "arn:aws:iam::386275436389:role/*"
     },
     {
       "Sid": "IamPassRoleToWorkloads",
       "Effect": "Allow",
       "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::386275436389:role/arkcloud-dev-*",
+      "Resource": "arn:aws:iam::386275436389:role/*",
       "Condition": {
         "StringEquals": {
           "iam:PassedToService": [

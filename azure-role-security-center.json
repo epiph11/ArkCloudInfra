@@ -1,0 +1,7 @@
+{
+  "Name": "arkcloud-ci-security-center",
+  "IsCustom": true,
+  "Description": "arkcloudinfra-ci - gestion des plans Defender for Cloud, scope souscription (Azure ne permet pas de scoper cette ressource a un resource group)",
+  "Actions": ["Microsoft.Security/pricings/read", "Microsoft.Security/pricings/write"],
+  "AssignableScopes": ["/subscriptions/dd810534-1452-4967-95ed-cf2de0fd5816"]
+}

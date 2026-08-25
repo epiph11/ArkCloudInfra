@@ -1,0 +1,12 @@
+{
+  "Name": "arkcloud-ci-network-watcher",
+  "IsCustom": true,
+  "Description": "arkcloudinfra-ci - lecture/gestion des flow logs sur NetworkWatcherRG (hors rg-arkcloud-dev)",
+  "Actions": [
+    "Microsoft.Network/networkWatchers/read",
+    "Microsoft.Network/networkWatchers/flowLogs/read",
+    "Microsoft.Network/networkWatchers/flowLogs/write",
+    "Microsoft.Network/networkWatchers/flowLogs/delete"
+  ],
+  "AssignableScopes": ["/subscriptions/dd810534-1452-4967-95ed-cf2de0fd5816/resourceGroups/NetworkWatcherRG"]
+}
