@@ -3,8 +3,8 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "postgres_secret_arn" {
-  description = "From modules/aws/secrets — granted to the execution role so ECS can inject it into a container as an env var before the process starts."
+variable "arkcloud_app_secret_arn" {
+  description = "From modules/aws/secrets — the arkcloud_app (least-privilege, DML-only) role's connection string, granted to the execution role so ECS can inject it into a container as an env var before the process starts. NOT the admin secret: since the Sprint 6 STRIDE elevation-of-privilege cutover (task #69), the running application never reads the admin credential at all — only modules/aws/secret-rotation (a separate role, separate ARN) still touches it, to actually rotate it."
   type        = string
 }
 

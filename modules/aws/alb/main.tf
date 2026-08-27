@@ -19,6 +19,118 @@
 # DNS-validated certificate the moment a domain exists for this project — the listener/cert
 # resources below don't need to change shape, just point `aws_lb_listener.https` at a real
 # `aws_acm_certificate` instead of this module's self-signed one.
+data "aws_caller_identity" "current" {}
+
+# STRIDE Sprint 6 remediation ("Repudiation" gap, flow 1: navigateur → ALB) — until now nothing
+# proved after the fact who actually reached the ALB: the application logs its own requests,
+# but not the load-balancer layer in front of it. Checkov CKV_AWS_91 already flagged this at
+# Sprint 6 and was skipped for lack of a dedicated bucket (see ArkCloudInfra README §9) — this
+# closes both the STRIDE gap and that skip at the same time.
+resource "aws_s3_bucket" "alb_logs" {
+  bucket = "arkcloud-alb-logs-${var.name_prefix}-${data.aws_caller_identity.current.account_id}"
+
+  tags = merge(var.tags, { Name = "s3-alb-logs-${var.name_prefix}" })
+}
+
+resource "aws_s3_bucket_ownership_controls" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# SSE-S3 (AES256) isn't the usual "a managed key is enough for dev" shortcut used elsewhere in
+# this project — it's the ONLY server-side encryption option ELB access logging supports. A
+# KMS-encrypted bucket here would silently fail delivery (confirmed in AWS's own access-logging
+# documentation), so this isn't a choice to revisit later like the RDS/Secrets Manager ones.
+resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Same protective reasoning as modules/aws/cloudtrail's bucket: these logs are the evidence
+# this whole change exists to produce, so guarding them against accidental/malicious
+# overwrite-or-delete is worth the near-zero cost even at dev-tier.
+resource "aws_s3_bucket_versioning" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Same 90-day dev-tier retention window already used for CloudTrail (modules/aws/cloudtrail)
+# and the Azure NSG flow logs (modules/azure/flow-logs) — one consistent log-retention story
+# across the project instead of a bespoke value per bucket.
+resource "aws_s3_bucket_lifecycle_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    id     = "expire-old-logs"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 90
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+# AWS's current (post-August 2022) recommended policy: a single service principal valid in
+# every region, replacing the old per-region "ELB account ID" lookup table. eu-west-1 predates
+# August 2022, but AWS's own documentation confirms the new policy is accepted there too — the
+# legacy per-region-account-ID form is kept only for backward compatibility, not required for
+# new setups.
+#
+# Deliberately NO aws:SourceArn condition here (first version of this file had one, via ArnLike)
+# — real apply failed twice with "Access Denied for bucket" even after the policy had clearly
+# propagated (retried well after the first attempt). Root cause: IAM evaluates a condition that
+# references a context key the request doesn't actually populate as FALSE, not "ignored" — if
+# the ELB log-delivery service doesn't reliably set aws:SourceArn on this PutObject call, adding
+# that condition silently turns the whole Allow into a no-op. Neither AWS's own baseline policy
+# example nor a verified working Terraform config from a third party use this condition; the
+# resource path below (scoped to this account's AWSLogs prefix) is what actually restricts
+# access, matching both references exactly instead of adding an untested condition.
+data "aws_iam_policy_document" "alb_logs" {
+  statement {
+    sid    = "AWSLogDeliveryWrite"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
+    }
+
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.alb_logs.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"]
+  }
+}
+
+resource "aws_s3_bucket_policy" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+  policy = data.aws_iam_policy_document.alb_logs.json
+}
+
 resource "tls_private_key" "alb" {
   algorithm = "RSA"
   rsa_bits  = 2048
@@ -66,7 +178,23 @@ resource "aws_lb" "this" {
   # forwarding them to the targets.
   drop_invalid_header_fields = true
 
+  # STRIDE Sprint 6 remediation (Repudiation, flow 1) — see the alb_logs bucket above for the
+  # full rationale. No prefix: this ALB is the only thing writing to this bucket, so there's no
+  # need to namespace paths within it.
+  access_logs {
+    bucket  = aws_s3_bucket.alb_logs.id
+    enabled = true
+  }
+
   tags = merge(var.tags, { Name = "alb-${var.name_prefix}" })
+
+  # Ensures the bucket policy is in place before ELB tries to validate write access to it —
+  # without this, the first apply can fail with an access-denied error depending on ordering,
+  # same reasoning as modules/aws/cloudtrail's depends_on on aws_cloudtrail.this.
+  depends_on = [
+    aws_s3_bucket_policy.alb_logs,
+    aws_s3_bucket_ownership_controls.alb_logs,
+  ]
 }
 
 resource "aws_lb_target_group" "api" {

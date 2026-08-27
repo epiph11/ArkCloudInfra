@@ -31,3 +31,44 @@ resource "aws_secretsmanager_secret" "jwt" {
 
   tags = var.tags
 }
+
+# arkcloud_app — the least-privilege, DML-only Postgres role introduced in Sprint 6 to close the
+# STRIDE "Elevation of privilege" finding (ArkCloud.API currently connects as the RDS master
+# user). Unlike postgres/jwt above, this secret's real value is never set out-of-band by a human
+# — modules/aws/secret-rotation, instantiated a second time in "app" mode
+# (environments/dev/main.tf), owns its entire lifecycle: it creates the role (if missing),
+# rotates its password, and promotes the new version, all inside the same Lambda that already
+# handles the master password rotation.
+#
+# Secrets Manager's rotation API needs an existing AWSCURRENT version to rotate away from before
+# it can run for the first time (real failure mode already hit once in this project — see bug
+# 6.11 in the Sprint 5 report, ResourceNotFoundException for staging label AWSCURRENT). So this
+# resource seeds one with a throwaway random value that is never used to authenticate anything —
+# the rotation Lambda's first run (triggered immediately on attaching rotation, same as the
+# master secret) overwrites it with the real, live password within the same `terraform apply`.
+#
+# ignore_changes is required for the same reason modules/azure/postgresql and modules/aws/rds
+# ignore_changes on their admin password: once the Lambda has rotated this secret, its live value
+# no longer matches what Terraform put here, and without ignore_changes the next `terraform plan`
+# would want to reset it back to this placeholder — silently undoing every rotation since.
+resource "random_password" "arkcloud_app_bootstrap" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "arkcloud_app" {
+  name                    = "arkcloud/${var.name_prefix}/arkcloud-app-role"
+  description             = "ArkCloud.API's least-privilege DML-only Postgres role (arkcloud_app) - STRIDE elevation-of-privilege remediation, Sprint 6. Created and rotated entirely by modules/aws/secret-rotation (app-role mode), not set out-of-band."
+  recovery_window_in_days = var.recovery_window_in_days
+
+  tags = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "arkcloud_app_bootstrap" {
+  secret_id     = aws_secretsmanager_secret.arkcloud_app.id
+  secret_string = "Host=placeholder;Port=5432;Database=placeholder;Username=arkcloud_app;Password=${random_password.arkcloud_app_bootstrap.result};Ssl Mode=Require"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}

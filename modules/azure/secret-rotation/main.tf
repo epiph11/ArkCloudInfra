@@ -10,14 +10,17 @@
 # one is driven by an azurerm_automation_schedule on a fixed interval, not by an Action Group
 # reacting to an event.
 #
-# The three steps the runbook performs are deliberately in this order:
+# The two steps the runbook performs are deliberately in this order:
 #   1. Change the password on the server.
-#   2. Write the new connection string to Key Vault.
-#   3. Restart the API App Service.
-# There is an unavoidable window between (1) and (3) where the running app still holds the old
-# password and its DB calls fail. That's why rotation_start_time should be an off-peak hour.
+#   2. Write the new connection string to Key Vault (connection_string_secret_name).
 # Doing (2) before (1) would be worse — Key Vault would advertise a password the server hasn't
 # accepted yet.
+#
+# A third step — restarting the API App Service — existed here before the Sprint 6 STRIDE
+# cutover (task #69), back when ArkCloud.API read this exact secret directly and needed a kick
+# to pick up the new value. Removed once the app moved to arkcloud_app instead: nothing consumes
+# this secret live anymore, so there is nothing left to restart on its behalf. See
+# connection_string_secret_name's description in variables.tf for what this secret is for now.
 #
 # NOT handled here, on purpose: the AWS-side Postgres password (see modules/aws/secret-rotation,
 # which uses Secrets Manager's native rotation instead — different mechanism, same 90-day
@@ -88,31 +91,13 @@ resource "azurerm_role_assignment" "rotation_key_vault" {
   principal_id         = azurerm_automation_account.rotation.identity[0].principal_id
 }
 
-# Ici, en revanche, une action RBAC dédiée existe vraiment (contrairement au cas Postgres
-# ci-dessus) : Microsoft.Web/sites/restart/action. Le rôle personnalisé exclut donc complètement
-# "write" — cette identité ne peut ni changer la configuration de l'App Service (app settings,
-# image conteneur, réseau) ni la supprimer, seulement lire son état et la redémarrer.
-resource "azurerm_role_definition" "app_service_restart" {
-  name        = "arkcloud-${var.name_prefix}-app-service-restart"
-  scope       = var.resource_group_id
-  description = "Lecture + redémarrage d'un App Service — rien d'autre : pas d'écriture sur la config, l'image conteneur ou les app settings."
-
-  permissions {
-    actions = [
-      "Microsoft.Web/sites/read",
-      "Microsoft.Web/sites/restart/action",
-    ]
-    not_actions = []
-  }
-
-  assignable_scopes = [var.resource_group_id]
-}
-
-resource "azurerm_role_assignment" "rotation_app_service" {
-  scope              = var.app_service_id
-  role_definition_id = azurerm_role_definition.app_service_restart.role_definition_resource_id
-  principal_id       = azurerm_automation_account.rotation.identity[0].principal_id
-}
+# App Service restart role/assignment REMOVED at the Sprint 6 STRIDE cutover (task #69): the
+# runbook no longer restarts app-arkcloud-api-dev after rotating arkcloudadmin's password,
+# because the running app doesn't read this secret at all anymore (it connects as arkcloud_app —
+# see connection_string_secret_name's description in variables.tf). Keeping this role assignment
+# would have meant an identity retaining a real permission (restart a production App Service)
+# for an action nothing triggers anymore — exactly the kind of unused-but-still-granted access
+# this whole remediation exists to close, so it's deleted rather than left dormant.
 
 resource "azurerm_automation_runbook" "rotate_postgres_password" {
   name                    = "Rotate-ArkCloudPostgresPassword"
@@ -245,17 +230,7 @@ resource "azurerm_automation_runbook" "rotate_postgres_password" {
     Invoke-RestMethod @kvParams | Out-Null
 
     Write-Output "Key Vault secret '${var.connection_string_secret_name}' updated."
-
-    # --- Step 3: restart the API so it picks up the new value ---------------------------------
-    # App Service caches Key Vault references; without this the app keeps using the now-invalid
-    # old password until its own refresh interval elapses.
-    $restartUri = "https://management.azure.com${var.app_service_id}/restart?api-version=2023-12-01"
-    $restart = Invoke-AzRestMethod -Method POST -Uri $restartUri
-    if ($restart.StatusCode -ge 400) {
-      throw "App Service restart failed with HTTP $($restart.StatusCode): $($restart.Content)"
-    }
-
-    Write-Output "API restarted. Rotation complete."
+    Write-Output "Rotation complete. This is the admin credential only -- ArkCloud.API connects as arkcloud_app and never reads this secret, so no App Service restart is needed here (see this runbook's header comment)."
     Write-Output "Remember to update .github/secrets-inventory.json's last_rotated date so secret-expiry-check.yml stops asking for a manual rotation."
   EOT
 

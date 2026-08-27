@@ -1,0 +1,9 @@
+# Unpinned on purpose -- this is a short-lived experiment (see main.tf's module header), not a
+# long-running service that needs reproducible-build guarantees the way the AWS Lambda package
+# does (modules/aws/secret-rotation/lambda/README.md). Azure's remote build (Oryx, triggered by
+# SCM_DO_BUILD_DURING_DEPLOYMENT=true) resolves and installs these against the Flex Consumption
+# Linux/Python 3.11 target at deploy time.
+azure-functions
+azure-identity
+azure-keyvault-secrets
+psycopg2-binary

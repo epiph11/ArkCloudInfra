@@ -20,6 +20,13 @@ module "network" {
   database_subnet_prefix         = "10.10.2.0/24"
   private_endpoint_subnet_prefix = "10.10.3.0/24"
 
+  # TEMPORARY (Sprint 6) — Azure Functions Flex Consumption experiment, see
+  # modules/azure/functions-experiment and README.md §10. .1-.4 above are already taken as
+  # /24 blocks; /27 is enough for a subnet that only ever hosts one Function App's VNet
+  # integration. Remove this line (and the module.functions_experiment block below) once the
+  # experiment concludes and Azure switches to the free Kudu-based rotation instead.
+  functions_subnet_prefix = "10.10.5.0/27"
+
   tags = local.common_tags
 }
 
@@ -305,8 +312,11 @@ module "aws_ecs" {
 
   name_prefix = "arkcloud-${var.environment}"
 
-  postgres_secret_arn = module.aws_secrets.postgres_secret_arn
-  jwt_secret_arn      = module.aws_secrets.jwt_secret_arn
+  # Sprint 6 STRIDE cutover (task #69): the execution role reads arkcloud_app's connection
+  # string, not arkcloudadmin's — see modules/aws/ecs/variables.tf's comment on why the admin
+  # secret is deliberately NOT granted here anymore.
+  arkcloud_app_secret_arn = module.aws_secrets.arkcloud_app_secret_arn
+  jwt_secret_arn          = module.aws_secrets.jwt_secret_arn
 
   tags = local.common_tags
 }
@@ -341,10 +351,17 @@ module "aws_ecs_service_api" {
     ASPNETCORE_ENVIRONMENT = "Production"
   }
 
-  # See the module-level comment above — verify these two config key names against the real
-  # app before treating this as working.
+  # Config key names confirmed against the real app this session (not just assumed): .NET's
+  # AddAzureKeyVault/ECS "__" nesting both map to ConnectionStrings:DefaultConnection, which
+  # InfrastructureServiceRegistration.cs reads via GetConnectionString("DefaultConnection").
+  #
+  # arkcloud_app, not arkcloudadmin (Sprint 6 STRIDE cutover, task #69) — the running API now
+  # connects with the least-privilege DML-only role. Verified before this switch that nothing in
+  # ArkCloud.API's own startup path runs migrations against its own connection (no
+  # Database.Migrate() call in Program.cs, no CI step either) — schema changes are applied
+  # out-of-band with the admin credential, so arkcloud_app never needs DDL.
   secrets = {
-    ConnectionStrings__DefaultConnection = module.aws_secrets.postgres_secret_arn
+    ConnectionStrings__DefaultConnection = module.aws_secrets.arkcloud_app_secret_arn
     Jwt__Key                             = module.aws_secrets.jwt_secret_arn
   }
 
@@ -488,6 +505,55 @@ module "aws_secret_rotation" {
   tags = local.common_tags
 }
 
+# Second instantiation of the same module, in "app" mode — Sprint 6 STRIDE elevation-of-privilege
+# remediation (task #69, docs/threat-model-stride.md flow 3). Rotates arkcloud_app, the
+# least-privilege DML-only role ArkCloud.API should connect as instead of the RDS master user.
+# This IS the bootstrap: attaching rotation to a freshly created secret (module.aws_secrets'
+# arkcloud_app secret) triggers an immediate first rotation, same as module.aws_secret_rotation
+# above — so `terraform apply` both creates the role and sets its first real password in one
+# motion, no separate manual script needed (see modules/aws/secrets' arkcloud_app secret comment
+# and lambda/rotate.py's TARGET_ROLE comment for the full reasoning).
+#
+# admin_secret_arn/admin_username: read-only access to the EXISTING admin secret/username above —
+# this Lambda authenticates as arkcloudadmin to manage arkcloud_app, but never writes to or
+# rotates the admin secret itself; module.aws_secret_rotation (unchanged, above) still owns that.
+#
+# ecs_cluster_name/ecs_service_name/ecs_service_arn now wired in (Sprint 6 cutover, task #69):
+# ArkCloud.API reads this secret for real now (ConnectionStrings__DefaultConnection ->
+# arkcloud_app_secret_arn, see module.aws_ecs_service_api above) — so the next automatic
+# rotation (90 days) must redeploy the service the same way module.aws_secret_rotation does for
+# the master password, or the running containers would keep the now-stale password in memory
+# until their next unrelated restart.
+module "aws_secret_rotation_app_role" {
+  source = "../../modules/aws/secret-rotation"
+
+  name_prefix = "arkcloud-${var.environment}"
+  target_role = "app"
+
+  secret_arn = module.aws_secrets.arkcloud_app_secret_arn
+
+  db_host     = module.aws_rds.address
+  db_port     = module.aws_rds.port
+  db_name     = module.aws_rds.database_name
+  db_username = "arkcloud_app"
+
+  admin_secret_arn = module.aws_secrets.postgres_secret_arn
+  admin_username   = module.aws_rds.master_username
+
+  ecs_cluster_name = module.aws_ecs.cluster_name
+  ecs_service_name = module.aws_ecs_service_api.service_name
+  ecs_service_arn  = module.aws_ecs_service_api.service_arn
+
+  vpc_subnet_ids    = module.aws_vpc.ecs_subnet_ids
+  security_group_id = module.aws_security.secret_rotation_security_group_id
+
+  rotation_interval_days = var.aws_rotation_interval_days
+
+  alarm_sns_topic_arn = module.aws_monitoring.sns_topic_arn
+
+  tags = local.common_tags
+}
+
 module "azure_secret_rotation" {
   source = "../../modules/azure/secret-rotation"
 
@@ -505,11 +571,59 @@ module "azure_secret_rotation" {
   key_vault_id   = module.key_vault.id
   key_vault_name = module.key_vault.name
 
-  app_service_id   = module.app_service_api.id
-  app_service_name = module.app_service_api.name
+  # Sprint 6 STRIDE cutover (task #69): a distinct, admin-only secret name — deliberately NOT
+  # "ConnectionStrings--DefaultConnection" anymore, which is now the secret app-arkcloud-api-dev
+  # actually reads (arkcloud_app's connection string, see the Functions-experiment/Kudu bootstrap
+  # for what writes it). Renaming this avoided a real, easy-to-miss failure mode: without this
+  # change, the next scheduled admin rotation would have silently overwritten the app's real
+  # connection string back to arkcloudadmin's, undoing the cutover unnoticed until something
+  # broke. app_service_id/app_service_name removed from this block entirely — see
+  # modules/azure/secret-rotation's main.tf/variables.tf for why the restart step is gone too.
+  connection_string_secret_name = "Postgres--AdminConnection"
 
   rotation_interval_days = var.azure_rotation_interval_days
   rotation_start_time    = var.azure_rotation_start_time
+
+  tags = local.common_tags
+}
+
+# TEMPORARY (Sprint 6) — Azure Functions experiment, see modules/azure/functions-experiment's
+# main.tf header for the full context (ADR-0010: not kept as the permanent rotation mechanism,
+# that becomes a manual Kudu procedure once written — task #83, backlog). Its infrastructure is
+# left running for now (no cost at rest), and it did one more real job beyond the experiment
+# itself: bootstrapping the actual STRIDE flux 3 cutover (task #69) by writing arkcloud_app's
+# connection string directly into the secret ArkCloud.API really reads
+# ("ConnectionStrings--DefaultConnection", app_role_secret_name below) — no separate one-off
+# script needed, since the function that already proved this worked was sitting right there.
+#
+# admin_connection_string_secret_name overridden to match the rename in module.azure_secret_rotation
+# above ("Postgres--AdminConnection") — without this override the function would read a secret
+# name the admin rotation no longer writes to.
+#
+# Before applying: build the deployment package first —
+#   bash modules/azure/functions-experiment/build.sh
+# (mirrors modules/aws/secret-rotation/lambda/build.sh's role, much simpler here — no local
+# pip install needed, Azure's remote build handles psycopg2's C extension server-side.)
+module "functions_experiment" {
+  source = "../../modules/azure/functions-experiment"
+
+  resource_group_name = module.resource_group.name
+  location            = var.location
+  name_prefix         = "arkcloud-${var.environment}"
+
+  subnet_id = module.network.functions_subnet_id
+
+  postgres_host           = module.postgresql.fqdn
+  postgres_database_name  = module.postgresql.database_name
+  postgres_admin_username = module.postgresql.administrator_login
+
+  key_vault_id  = module.key_vault.id
+  key_vault_uri = module.key_vault.vault_uri
+
+  admin_connection_string_secret_name = "Postgres--AdminConnection"
+  app_role_secret_name                = "ConnectionStrings--DefaultConnection"
+
+  application_insights_connection_string = module.monitoring.connection_string
 
   tags = local.common_tags
 }

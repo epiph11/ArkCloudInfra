@@ -67,3 +67,17 @@ aws secretsmanager rotate-secret --secret-id arkcloud/arkcloud-dev/postgres
 ```
 
 **Après chaque rotation réussie**, mettre à jour `last_rotated` pour `POSTGRES_ADMIN_PASSWORD (AWS)` dans `.github/secrets-inventory.json` — sinon le check d'échéance (`secret-expiry-check.yml`) continuera de réclamer une rotation manuelle déjà faite automatiquement.
+
+## Deuxième instance — mode `app` (rôle `arkcloud_app`, Sprint 6)
+
+`environments/dev/main.tf` instancie ce module une seconde fois (`module.aws_secret_rotation_app_role`, `target_role = "app"`) pour le rôle applicatif à moindre privilège `arkcloud_app` (remédiation STRIDE « Elevation of privilege », flux 3). Un seul `rotate.py`, une seule branche de code activée par la variable d'environnement `TARGET_ROLE` — donc un seul build (`build.sh` ci-dessus) sert les deux fonctions Lambda, pas de package séparé à construire.
+
+Cette instance **crée le rôle** au lieu de simplement changer son mot de passe, la toute première fois qu'elle tourne — pas de script SQL séparé à exécuter à la main. Suivre le premier run :
+
+```powershell
+aws logs tail /aws/lambda/secret-rotation-arkcloud-dev-app --follow
+```
+
+`setSecret` doit afficher soit `created role arkcloud_app (bootstrap, first rotation)` (premier apply), soit `altered password for existing role arkcloud_app` (rotations suivantes). Si `testSecret` échoue ici, c'est que `arkcloud_app` n'a pas pu s'authentifier avec le nouveau mot de passe — le rôle reste tel qu'il était avant cette tentative, rien n'est promu.
+
+Cette instance ne redémarre aucun service ECS (`ECS_CLUSTER`/`ECS_SERVICE` non configurés tant que `ConnectionStrings__DefaultConnection` ne pointe pas encore vers `arkcloud_app` — voir `docs/infra-roadmap.md`, étape 4 du découpage) : `finishSecret` promeut simplement la version, sans redéploiement.

@@ -78,6 +78,30 @@ resource "azurerm_subnet" "private_endpoint" {
   address_prefixes     = [var.private_endpoint_subnet_prefix]
 }
 
+# --- TEMPORARY (Sprint 6 experiment, see modules/azure/functions-experiment): dedicated subnet
+# for an Azure Functions Flex Consumption app's VNet integration. count-gated on
+# functions_subnet_prefix being set, rather than always created, so removing the experiment
+# later is just deleting the variable's value in environments/dev/main.tf — no HCL to prune here
+# and no destroy/recreate risk to the four subnets above. ---
+resource "azurerm_subnet" "functions" {
+  count                = var.functions_subnet_prefix != null ? 1 : 0
+  name                 = "snet-functions"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.this.name
+  address_prefixes     = [var.functions_subnet_prefix]
+
+  # "join/action" confirmed via Microsoft's own Terraform example for Flex Consumption VNet
+  # integration (registry.terraform.io azurerm_function_app_flex_consumption docs) — same action
+  # string as the Postgres delegation above, different service_delegation.name.
+  delegation {
+    name = "functions-delegation"
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+
 # --- NSG: API subnet. No custom rules — Azure's default rules already deny inbound from
 # Internet and allow outbound (VNet integration is outbound-only anyway, nothing ever
 # listens for inbound traffic on this subnet). Left as an explicit resource, empty for now,
@@ -122,9 +146,10 @@ resource "azurerm_subnet_network_security_group_association" "web" {
   network_security_group_id = azurerm_network_security_group.web.id
 }
 
-# --- NSG: database subnet — PostgreSQL (5432) only from the API subnet. Neither the web
-# subnet nor anything else can reach it; this is the real enforcement point for "backend
-# and frontend are not the same trust tier" — not the subnet split itself. ---
+# --- NSG: database subnet — PostgreSQL (5432) only from the API subnet (and, temporarily, the
+# Functions experiment subnet below). Neither the web subnet nor anything else can reach it;
+# this is the real enforcement point for "backend and frontend are not the same trust tier" —
+# not the subnet split itself. ---
 resource "azurerm_network_security_group" "database" {
   name                = "nsg-database"
   resource_group_name = var.resource_group_name
@@ -142,11 +167,48 @@ resource "azurerm_network_security_group" "database" {
     source_address_prefix      = var.api_subnet_prefix
     destination_address_prefix = "*"
   }
+
+  # TEMPORARY (Sprint 6 experiment) — a separate named rule rather than turning
+  # source_address_prefix above into a list, so removing the experiment later is deleting this
+  # one dynamic block, not editing the rule the API depends on. Only materializes when
+  # functions_subnet_prefix is set (see azurerm_subnet.functions).
+  dynamic "security_rule" {
+    for_each = var.functions_subnet_prefix != null ? [1] : []
+    content {
+      name                       = "AllowPostgresFromFunctionsExperiment"
+      priority                   = 110
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "5432"
+      source_address_prefix      = var.functions_subnet_prefix
+      destination_address_prefix = "*"
+    }
+  }
 }
 
 resource "azurerm_subnet_network_security_group_association" "database" {
   subnet_id                 = azurerm_subnet.database.id
   network_security_group_id = azurerm_network_security_group.database.id
+}
+
+# --- NSG: TEMPORARY Functions-experiment subnet. Empty like nsg-api/nsg-private-endpoint —
+# outbound is unrestricted by default (needed anyway: Storage/Key Vault traffic leaves this
+# subnet over the public internet, only the 10.10.2.0/24 Postgres destination gets routed
+# through the VNet automatically because it's an RFC1918 range). ---
+resource "azurerm_network_security_group" "functions" {
+  count               = var.functions_subnet_prefix != null ? 1 : 0
+  name                = "nsg-functions-experiment"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  tags                = var.tags
+}
+
+resource "azurerm_subnet_network_security_group_association" "functions" {
+  count                     = var.functions_subnet_prefix != null ? 1 : 0
+  subnet_id                 = azurerm_subnet.functions[0].id
+  network_security_group_id = azurerm_network_security_group.functions[0].id
 }
 
 # --- NSG: private-endpoint subnet. Empty like nsg-api — nothing initiates outbound from here

@@ -40,6 +40,12 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
 # Read access to the two Secrets Manager containers created in modules/aws/secrets — this is
 # what lets the "secrets" block in each task definition (modules/aws/ecs-service) resolve a
 # secret ARN into an env var value at container startup.
+#
+# arkcloud_app's secret, not the admin one: the execution role only needs to read whatever gets
+# injected as ConnectionStrings__DefaultConnection, and since the Sprint 6 cutover that's
+# arkcloud_app's connection string (DML-only). Granting read on the admin secret here too would
+# undermine the least-privilege point of that cutover — nothing running under this role has any
+# remaining reason to ever see arkcloudadmin's credential.
 resource "aws_iam_role_policy" "execution_secrets" {
   name = "read-secrets"
   role = aws_iam_role.execution.id
@@ -49,7 +55,7 @@ resource "aws_iam_role_policy" "execution_secrets" {
     Statement = [{
       Effect   = "Allow"
       Action   = "secretsmanager:GetSecretValue"
-      Resource = [var.postgres_secret_arn, var.jwt_secret_arn]
+      Resource = [var.arkcloud_app_secret_arn, var.jwt_secret_arn]
     }]
   })
 }

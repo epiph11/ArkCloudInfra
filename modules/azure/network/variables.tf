@@ -35,6 +35,12 @@ variable "private_endpoint_subnet_prefix" {
   type        = string
 }
 
+variable "functions_subnet_prefix" {
+  description = "TEMPORARY (Sprint 6 experiment) — dedicated subnet for an Azure Functions Flex Consumption app's VNet integration, delegated to Microsoft.App/environments. Flex Consumption cannot share a subnet delegated to anything else (confirmed: Microsoft.Web/serverFarms and Microsoft.DBforPostgreSQL/flexibleServers are both incompatible), so this can't reuse snet-api/snet-web/snet-database. Minimum /27 per Microsoft's docs. Meant to be removed once the Functions experiment concludes (see modules/azure/functions-experiment)."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

@@ -33,3 +33,8 @@ output "database_nsg_id" {
 output "private_endpoint_nsg_id" {
   value = azurerm_network_security_group.private_endpoint.id
 }
+
+# TEMPORARY (Sprint 6 Functions experiment) — null when functions_subnet_prefix isn't set.
+output "functions_subnet_id" {
+  value = try(azurerm_subnet.functions[0].id, null)
+}

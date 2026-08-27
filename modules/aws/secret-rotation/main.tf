@@ -20,6 +20,20 @@
 
 locals {
   lambda_zip = coalesce(var.lambda_zip_path, "${path.module}/lambda/build/rotate.zip")
+
+  # Master keeps its original, unsuffixed name — this module already existed with target_role
+  # defaulting to "master" before app-role support was added, and renaming it would force
+  # Terraform to destroy/recreate the already-working, already-scheduled master rotation Lambda
+  # for no functional reason. Only the new app-role instantiation gets a suffix.
+  resource_name = var.target_role == "master" ? "secret-rotation-${var.name_prefix}" : "secret-rotation-${var.name_prefix}-${var.target_role}"
+
+  # Same backward-compatibility concern, separately, for the CloudWatch alarm: its original name
+  # ("${name_prefix}-secret-rotation-errors") uses a different word order than resource_name
+  # above. Reusing resource_name here would rename -- and therefore replace -- the master alarm
+  # for no functional reason (confirmed by a real `terraform plan` showing exactly that
+  # `-/+ must be replaced` before this local existed). Master keeps its exact original name; only
+  # app-role gets the newer, more descriptive pattern.
+  alarm_name = var.target_role == "master" ? "${var.name_prefix}-secret-rotation-errors" : "${local.resource_name}-errors"
 }
 
 # This module deliberately does NOT create the Lambda's security group or its sg-database
@@ -42,7 +56,7 @@ data "aws_iam_policy_document" "lambda_assume" {
 }
 
 resource "aws_iam_role" "rotation" {
-  name               = "secret-rotation-${var.name_prefix}"
+  name               = local.resource_name
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 
   tags = var.tags
@@ -76,22 +90,48 @@ data "aws_iam_policy_document" "rotation" {
     resources = ["*"] # No resource to scope to — this call creates nothing, it just returns a string.
   }
 
-  statement {
-    sid = "ModifyThisDatabaseOnly"
-    actions = [
-      "rds:ModifyDBInstance",
-      # Describe is needed by setSecret's wait loop — ModifyDBInstance is asynchronous, so the
-      # function polls until RDS reports the new password actually applied before letting
-      # testSecret run against it.
-      "rds:DescribeDBInstances",
-    ]
-    resources = [var.db_instance_arn]
+  # target_role="master" only — the RDS control-plane API used to rotate the one designated
+  # master account. Omitted entirely for target_role="app" rather than granted against nothing:
+  # that path never calls rds:ModifyDBInstance (see lambda/rotate.py's TARGET_ROLE branching),
+  # and a role that isn't the master account can't be reached through this API regardless.
+  dynamic "statement" {
+    for_each = var.target_role == "master" ? [1] : []
+    content {
+      sid = "ModifyThisDatabaseOnly"
+      actions = [
+        "rds:ModifyDBInstance",
+        # Describe is needed by setSecret's wait loop — ModifyDBInstance is asynchronous, so the
+        # function polls until RDS reports the new password actually applied before letting
+        # testSecret run against it.
+        "rds:DescribeDBInstances",
+      ]
+      resources = [var.db_instance_arn]
+    }
   }
 
-  statement {
-    sid       = "RedeployApiServiceOnly"
-    actions   = ["ecs:UpdateService"]
-    resources = [var.ecs_service_arn]
+  # Omitted when ecs_service_arn is null (target_role="app" today, until roadmap step 4 wires
+  # ArkCloud.API onto arkcloud_app) — finishSecret already skips the redeploy call itself when
+  # ECS_SERVICE isn't set; not granting the permission either is the same "don't hold access you
+  # don't use yet" posture the rest of this project's IAM follows.
+  dynamic "statement" {
+    for_each = var.ecs_service_arn != null ? [1] : []
+    content {
+      sid       = "RedeployApiServiceOnly"
+      actions   = ["ecs:UpdateService"]
+      resources = [var.ecs_service_arn]
+    }
+  }
+
+  # target_role="app" only — read-only access to the master secret, purely to authenticate long
+  # enough to run CREATE ROLE / ALTER ROLE / GRANT against the target role. No write action is
+  # ever granted here: this Lambda must never be able to change the admin account's own password.
+  dynamic "statement" {
+    for_each = var.target_role == "app" ? [1] : []
+    content {
+      sid       = "ReadAdminSecretForRoleManagementOnly"
+      actions   = ["secretsmanager:GetSecretValue"]
+      resources = [var.admin_secret_arn]
+    }
   }
 }
 
@@ -102,14 +142,14 @@ resource "aws_iam_role_policy" "rotation" {
 }
 
 resource "aws_cloudwatch_log_group" "rotation" {
-  name              = "/aws/lambda/secret-rotation-${var.name_prefix}"
+  name              = "/aws/lambda/${local.resource_name}"
   retention_in_days = 30 # Same window as the other log groups in this project.
 
   tags = var.tags
 }
 
 resource "aws_lambda_function" "rotation" {
-  function_name = "secret-rotation-${var.name_prefix}"
+  function_name = local.resource_name
   role          = aws_iam_role.rotation.arn
   handler       = "rotate.lambda_handler"
   runtime       = "python3.12"
@@ -148,15 +188,28 @@ resource "aws_lambda_function" "rotation" {
   }
 
   environment {
-    variables = {
-      DB_INSTANCE_IDENTIFIER = var.db_instance_identifier
-      DB_HOST                = var.db_host
-      DB_PORT                = tostring(var.db_port)
-      DB_NAME                = var.db_name
-      DB_USERNAME            = var.db_username
-      ECS_CLUSTER            = var.ecs_cluster_name
-      ECS_SERVICE            = var.ecs_service_name
-    }
+    variables = merge(
+      {
+        TARGET_ROLE = var.target_role
+        DB_HOST     = var.db_host
+        DB_PORT     = tostring(var.db_port)
+        DB_NAME     = var.db_name
+        DB_USERNAME = var.db_username
+      },
+      # master-only — the RDS instance identifier and the ECS service to redeploy afterwards.
+      var.target_role == "master" ? {
+        DB_INSTANCE_IDENTIFIER = var.db_instance_identifier
+      } : {},
+      # Set for either role, as long as a consumer is configured (null → key omitted, and
+      # finishSecret's `if not ECS_SERVICE` treats an unset env var the same as an empty one).
+      var.ecs_cluster_name != null ? { ECS_CLUSTER = var.ecs_cluster_name } : {},
+      var.ecs_service_name != null ? { ECS_SERVICE = var.ecs_service_name } : {},
+      # app-only — credentials to connect as, to manage a role that isn't the connecting user.
+      var.target_role == "app" ? {
+        ADMIN_SECRET_ARN = var.admin_secret_arn
+        ADMIN_USERNAME   = var.admin_username
+      } : {},
+    )
   }
 
   depends_on = [
@@ -188,8 +241,8 @@ resource "aws_lambda_permission" "secretsmanager" {
 resource "aws_cloudwatch_metric_alarm" "rotation_errors" {
   count = var.alarm_sns_topic_arn != null ? 1 : 0
 
-  alarm_name        = "${var.name_prefix}-secret-rotation-errors"
-  alarm_description = "The Postgres password rotation Lambda failed. The secret stays on its previous version (the app keeps working), but the password has NOT rotated - check /aws/lambda/secret-rotation-${var.name_prefix}."
+  alarm_name        = local.alarm_name
+  alarm_description = "The Postgres password rotation Lambda failed (target_role=${var.target_role}). The secret stays on its previous version (the app keeps working), but the password has NOT rotated - check /aws/lambda/${local.resource_name}."
 
   namespace   = "AWS/Lambda"
   metric_name = "Errors"

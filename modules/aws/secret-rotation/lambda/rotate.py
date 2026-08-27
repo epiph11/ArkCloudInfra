@@ -31,6 +31,7 @@ import time
 
 import boto3
 import psycopg2
+from psycopg2 import sql
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -39,13 +40,41 @@ secretsmanager = boto3.client("secretsmanager")
 rds = boto3.client("rds")
 ecs = boto3.client("ecs")
 
-DB_INSTANCE_IDENTIFIER = os.environ["DB_INSTANCE_IDENTIFIER"]
+# TARGET_ROLE selects which of two structurally different rotation paths this Lambda instance
+# runs (two separate Lambda instances exist, see modules/aws/secret-rotation's target_role
+# variable and environments/dev/main.tf's aws_secret_rotation / aws_secret_rotation_app_role):
+#
+#   master — the original Sprint 6 behaviour, unchanged. Rotates RDS's own master user via the
+#            control-plane API (rds.modify_db_instance). Can only ever target the one designated
+#            master account — that's an RDS API constraint, not a choice made here (see
+#            docs/infra-roadmap.md / the STRIDE elevation-of-privilege write-up for why this
+#            can't be reused for a second role).
+#
+#   app    — Sprint 6 STRIDE elevation-of-privilege remediation. Rotates arkcloud_app, the
+#            least-privilege DML-only role ArkCloud.API should connect as instead of the master
+#            user. Since no management-plane API can touch an arbitrary Postgres role, this
+#            path connects as the admin (read-only from ADMIN_SECRET_ARN, never modified) and
+#            runs real SQL. The very first run also creates the role — this Lambda IS the
+#            bootstrap, not a separate one-off script, precisely because both the bootstrap and
+#            every later rotation need the same private VPC network path to reach RDS, and
+#            building that path twice (once for a local script, once for this Lambda) would be
+#            duplicated, throwaway work. See modules/aws/secrets' arkcloud_app secret comment
+#            for how the very first version gets seeded so rotation has something to rotate from.
+TARGET_ROLE = os.environ.get("TARGET_ROLE", "master")
+
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
 DB_NAME = os.environ["DB_NAME"]
 DB_USERNAME = os.environ["DB_USERNAME"]
-ECS_CLUSTER = os.environ["ECS_CLUSTER"]
-ECS_SERVICE = os.environ["ECS_SERVICE"]
+
+# master-only
+DB_INSTANCE_IDENTIFIER = os.environ.get("DB_INSTANCE_IDENTIFIER")
+ECS_CLUSTER = os.environ.get("ECS_CLUSTER")
+ECS_SERVICE = os.environ.get("ECS_SERVICE")
+
+# app-only — credentials to connect AS, in order to manage a role that isn't the connecting user
+ADMIN_SECRET_ARN = os.environ.get("ADMIN_SECRET_ARN")
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
 
 # Same alphabet as the Azure runbook, for the same reason: connection strings are
 # semicolon/equals-delimited, so punctuation would need escaping that differs between the
@@ -104,6 +133,12 @@ def create_secret(arn, token):
 
 
 def set_secret(arn, token):
+    if TARGET_ROLE == "app":
+        return _set_secret_app_role(arn, token)
+    return _set_secret_master(arn, token)
+
+
+def _set_secret_master(arn, token):
     pending = _get_secret_value(arn, "AWSPENDING", token)
     new_password = _password_from_connection_string(pending)
 
@@ -141,6 +176,85 @@ def set_secret(arn, token):
 
         logger.info("setSecret: waiting (status=%s, password_pending=%s)", status, password_pending)
         time.sleep(10)
+
+
+def _set_secret_app_role(arn, token):
+    """Connects as the RDS master user (read-only from ADMIN_SECRET_ARN — that secret is never
+    written by this code path) and either creates DB_USERNAME (arkcloud_app) if it doesn't exist
+    yet, or just changes its password if it does. Same statement set as the original one-off
+    scripts/sql/bootstrap-arkcloud-app-role.sql (ArkCloudInfra), so the very first invocation of
+    this Lambda after `terraform apply` performs the real bootstrap — there is no separate manual
+    step. The GRANT/ALTER DEFAULT PRIVILEGES statements are re-run on every rotation, not just at
+    creation: they're idempotent, and re-running them is a cheap self-heal if a grant was ever
+    manually revoked, rather than a real cost.
+    """
+    pending = _get_secret_value(arn, "AWSPENDING", token)
+    new_password = _password_from_connection_string(pending)
+
+    admin_connection_string = _get_secret_value(ADMIN_SECRET_ARN, "AWSCURRENT")
+    admin_password = _password_from_connection_string(admin_connection_string)
+
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        port=int(DB_PORT),
+        dbname=DB_NAME,
+        user=ADMIN_USERNAME,
+        password=admin_password,
+        sslmode="require",
+        connect_timeout=15,
+    )
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (DB_USERNAME,))
+            role_exists = cur.fetchone() is not None
+
+            if role_exists:
+                cur.execute(
+                    sql.SQL("ALTER ROLE {} WITH PASSWORD %s").format(sql.Identifier(DB_USERNAME)),
+                    (new_password,),
+                )
+                logger.info("setSecret: altered password for existing role %s.", DB_USERNAME)
+            else:
+                cur.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                        "NOREPLICATION NOBYPASSRLS PASSWORD %s"
+                    ).format(sql.Identifier(DB_USERNAME)),
+                    (new_password,),
+                )
+                logger.info("setSecret: created role %s (bootstrap, first rotation).", DB_USERNAME)
+
+            cur.execute(
+                sql.SQL("GRANT CONNECT ON DATABASE {} TO {}")
+                .format(sql.Identifier(DB_NAME), sql.Identifier(DB_USERNAME))
+            )
+            cur.execute(
+                sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(DB_USERNAME))
+            )
+            cur.execute(
+                sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {}")
+                .format(sql.Identifier(DB_USERNAME))
+            )
+            cur.execute(
+                sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {}")
+                .format(sql.Identifier(DB_USERNAME))
+            )
+            cur.execute(
+                sql.SQL(
+                    "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public "
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {}"
+                ).format(sql.Identifier(ADMIN_USERNAME), sql.Identifier(DB_USERNAME))
+            )
+            cur.execute(
+                sql.SQL(
+                    "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public "
+                    "GRANT USAGE, SELECT ON SEQUENCES TO {}"
+                ).format(sql.Identifier(ADMIN_USERNAME), sql.Identifier(DB_USERNAME))
+            )
+        logger.info("setSecret: role %s ready with DML-only grants.", DB_USERNAME)
+    finally:
+        conn.close()
 
 
 def test_secret(arn, token):
@@ -217,6 +331,14 @@ def finish_secret(arn, token):
         RemoveFromVersionId=current_version,
     )
     logger.info("finishSecret: promoted %s to AWSCURRENT.", token)
+
+    # ECS_SERVICE is only set for the master-role Lambda. The app-role Lambda (TARGET_ROLE=app)
+    # rotates arkcloud_app's secret, but ArkCloud.API doesn't read that secret yet — the
+    # connection string switch (roadmap step 4) hasn't happened, so there's nothing running that
+    # would need to pick up a new value, and forcing a deployment would just be a no-op churn.
+    if not ECS_SERVICE:
+        logger.info("finishSecret: no ECS_SERVICE configured for this role, skipping redeploy.")
+        return
 
     # ECS injects secrets at task start, so running tasks still hold the old password. Same
     # reason the Azure runbook restarts the App Service. force_new_deployment rolls tasks with

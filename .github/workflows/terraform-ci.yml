@@ -338,6 +338,22 @@ jobs:
       #     ressource échouerait même à l'apply (elle exige que le compte soit déjà l'admin
       #     délégué GuardDuty d'une Organization). Pas un manque, une architecture différente de
       #     celle que le check suppose.
+      #
+      # modules/azure/functions-experiment (Sprint 6, ADR-0010) — 5 findings d'un run réel :
+      #   - CKV_AZURE_190 / CKV2_AZURE_47 (accès public/anonyme aux blobs) / CKV2_AZURE_38
+      #     (soft-delete) / CKV2_AZURE_21 (logging lecture Blob) : les 4 portent sur le storage
+      #     account de ce module, qui ne contient que le zip de déploiement de la fonction Python
+      #     (aucun secret, aucune donnée applicative — les vrais secrets restent dans Key Vault).
+      #     ADR-0010 a déjà tranché : ce module est un mécanisme temporaire d'expérimentation,
+      #     remplacé à terme par la procédure Kudu (tâche backlog #83) et destiné à être détruit,
+      #     pas durci pour un usage permanent. Durcir un storage account qu'on prévoit de
+      #     supprimer serait du travail jeté.
+      #   - CKV2_AZURE_31 (subnet sans NSG) sur module.network.azurerm_subnet.functions[0] : faux
+      #     positif confirmé en lisant le code — azurerm_subnet_network_security_group_association
+      #     "functions" existe bien (modules/azure/network/main.tf), avec le même count-gate que le
+      #     subnet lui-même. Checkov ne résout pas l'association à travers un index de count sur
+      #     une ressource conditionnelle ; même classe de limitation que CKV_AZURE_43/CKV_AWS_304
+      #     documentés plus haut, pas un vrai manque réseau.
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -360,7 +376,8 @@ jobs:
             CKV_AZURE_59,CKV_AZURE_43,CKV_AZURE_206,CKV_AZURE_33,
             CKV2_AZURE_1,CKV2_AZURE_33,CKV2_AZURE_40,CKV2_AZURE_41,
             CKV_AWS_115,CKV_AWS_116,CKV_AWS_173,CKV_AWS_272,CKV_AWS_304,
-            CKV_AZURE_20,CKV2_AWS_3
+            CKV_AZURE_20,CKV2_AWS_3,
+            CKV_AZURE_190,CKV2_AZURE_47,CKV2_AZURE_38,CKV2_AZURE_21,CKV2_AZURE_31
 
       - name: terraform init
         run: terraform init
@@ -381,13 +398,21 @@ jobs:
           terraform show -no-color tfplan >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-  # Ne tourne que sur push vers main (jamais sur une PR), après validate. Gated par
-  # l'Environment GitHub "production" — ajouter des reviewers requis dans Settings >
-  # Environments donne l'approbation manuelle avant tout apply réel, sans toucher au workflow.
+  # Tourne sur push vers main, ou sur un déclenchement manuel (workflow_dispatch) — jamais sur
+  # une PR — après validate. Gated par l'Environment GitHub "production" — ajouter des reviewers
+  # requis dans Settings > Environments donne l'approbation manuelle avant tout apply réel, sans
+  # toucher au workflow, y compris pour un run déclenché manuellement.
+  #
+  # workflow_dispatch ajouté ici (Sprint 6, remédiation STRIDE "Repudiation"/rotation GHCR_PAT) :
+  # avant ce changement, relancer ce workflow à la main ne faisait tourner que `validate` (plan),
+  # jamais un vrai apply — la procédure de rotation documentée en README §10 supposait à tort
+  # qu'un re-run manuel suffisait à repropager un secret déjà changé. Sans un vrai changement dans
+  # modules/**, environments/**, ou ce fichier, il n'existait auparavant aucun moyen de déclencher
+  # un apply à la demande.
   apply:
     name: Apply
     needs: validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     defaults:

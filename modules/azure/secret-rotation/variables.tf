@@ -49,18 +49,9 @@ variable "key_vault_name" {
 }
 
 variable "connection_string_secret_name" {
-  description = "Key Vault secret holding the full Npgsql connection string the API reads. Key Vault names can't contain \":\", so .NET's config provider maps \"--\" to \":\" — hence the double dash."
+  description = "Key Vault secret this runbook writes arkcloudadmin's rotated connection string to. UNTIL Sprint 6's STRIDE cutover (task #69), ArkCloud.API read this exact secret directly — hence the historical default \"ConnectionStrings--DefaultConnection\" (Key Vault names can't contain \":\", .NET's config provider maps \"--\" to \":\"). Since the cutover, the running app connects as arkcloud_app instead and never reads this secret at all; environments/dev/main.tf now points this at a distinctly-named admin-only secret (\"Postgres--AdminConnection\") so this rotation can never silently clobber the app's real connection string again. What still needs this secret: any ops script authenticating as admin to manage arkcloud_app itself (bootstrap/rotation — see modules/azure/functions-experiment and its eventual Kudu-based replacement)."
   type        = string
   default     = "ConnectionStrings--DefaultConnection"
-}
-
-variable "app_service_id" {
-  description = "App Service restarted after each rotation so it picks up the new connection string. Key Vault references are cached by the App Service platform, so without a restart the app keeps using the old (now invalid) password until its own refresh interval elapses."
-  type        = string
-}
-
-variable "app_service_name" {
-  type = string
 }
 
 variable "rotation_interval_days" {
@@ -78,7 +69,7 @@ variable "rotation_interval_days" {
 }
 
 variable "rotation_start_time" {
-  description = "RFC3339, must be at least 5 minutes in the future at apply time (Azure rejects schedules starting in the past). Pick an off-peak hour — the App Service restart that follows each rotation causes a brief interruption."
+  description = "RFC3339, must be at least 5 minutes in the future at apply time (Azure rejects schedules starting in the past). No longer needs to dodge peak hours for an App Service restart (removed at the Sprint 6 cutover — see connection_string_secret_name's description) — kept off-peak anyway since the PostgreSQL server itself briefly cycles through the password change."
   type        = string
 }
 
