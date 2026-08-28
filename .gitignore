@@ -31,3 +31,10 @@ modules/aws/*/lambda/build/
 Thumbs.db
 .vscode/
 .idea/
+
+# Sprint 6 incident (2026-08-28) : ce fichier binaire contient tfstate+tfstate-prev en clair,
+# jamais un simple plan lisible — committé par erreur une fois, secrets exposes publiquement,
+# purge d'historique + rotation totale requises. Ne JAMAIS le committer.
+*.tfplan
+tfplan
+environments/*/tfplan
