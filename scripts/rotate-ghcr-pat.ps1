@@ -46,6 +46,9 @@ param(
     [string]$ResourceGroup = "rg-arkcloud-dev",
     [string]$ApiAppName = "app-arkcloud-api-dev",
     [string]$WebAppName = "app-arkcloud-web-dev",
+    [string]$ApiImage = "ghcr.io/epiph11/arkcloud-api:dev",
+    [string]$WebImage = "ghcr.io/epiph11/arkcloud-web:dev",
+    [string]$RegistryUser = "epiph11",
     [string]$InventoryPath = $null
 )
 
@@ -111,7 +114,26 @@ try {
         throw "Run $runId did not succeed (exit $LASTEXITCODE). GHCR_PAT secret is already updated, but the apply did NOT complete - do not restart the App Services yet. Check the run before re-triggering."
     }
 
-    # --- Step 4: restart both App Services ---------------------------------------------------
+    # --- Step 4: push the new credential via the container-config API, then restart -----------
+    # `terraform apply` above already wrote docker_registry_password via application_stack, but
+    # that alone is not enough (Sprint 6, confirmed real incident): the azurerm provider's
+    # application_stack.docker_registry_* arguments don't reliably reach the App Service's actual
+    # container-pull subsystem (hashicorp/terraform-provider-azurerm#22996, #23525). Trying to
+    # also set the classic DOCKER_REGISTRY_SERVER_* app_settings from Terraform is explicitly
+    # rejected by the provider ("cannot set a value for ... in app_settings" once
+    # application_stack is in use) - so the working fix has to happen out-of-band, via
+    # `az webapp config container set`, the same call this step now makes automatically instead
+    # of leaving it as a manual step someone has to remember mid-incident.
+    Write-Host "==> Pushing registry credentials to $ApiAppName via container-config API..."
+    az webapp config container set --resource-group $ResourceGroup --name $ApiAppName `
+        --docker-custom-image-name $ApiImage --docker-registry-server-url "https://ghcr.io" `
+        --docker-registry-server-user $RegistryUser --docker-registry-server-password $plainToken | Out-Null
+
+    Write-Host "==> Pushing registry credentials to $WebAppName via container-config API..."
+    az webapp config container set --resource-group $ResourceGroup --name $WebAppName `
+        --docker-custom-image-name $WebImage --docker-registry-server-url "https://ghcr.io" `
+        --docker-registry-server-user $RegistryUser --docker-registry-server-password $plainToken | Out-Null
+
     Write-Host "==> Restarting $ApiAppName..."
     az webapp restart --resource-group $ResourceGroup --name $ApiAppName | Out-Null
 

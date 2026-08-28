@@ -57,22 +57,6 @@ resource "azurerm_linux_web_app" "this" {
       "KeyVault__Uri"                         = var.key_vault_uri
       "APPLICATIONINSIGHTS_CONNECTION_STRING" = var.app_insights_connection_string
     },
-    # Duplicates application_stack.docker_registry_* above on paper — kept anyway because that
-    # duplication is the actual fix for a confirmed azurerm provider bug (Sprint 6, real incident:
-    # GHCR_PAT rotated, `terraform apply` showed the new value written, "No changes" on every
-    # later plan confirming state matched — yet the container kept failing
-    # ImagePullUnauthorizedFailure until these three settings were also pushed via
-    # `az webapp config container set`, a different legacy API path). Same root cause as
-    # hashicorp/terraform-provider-azurerm#22996 and #23525: application_stack's docker_registry_*
-    # arguments don't reliably reach the App Service's actual container-pull subsystem on their
-    # own. Setting the classic DOCKER_REGISTRY_SERVER_* app settings directly is the documented
-    # workaround. If a future provider release fixes #22996, this block becomes redundant but
-    # harmless — leave it until then rather than relying on an open upstream issue.
-    var.container_registry_password != "" ? {
-      "DOCKER_REGISTRY_SERVER_URL"      = var.container_registry_url
-      "DOCKER_REGISTRY_SERVER_USERNAME" = var.container_registry_username
-      "DOCKER_REGISTRY_SERVER_PASSWORD" = var.container_registry_password
-    } : {},
     var.extra_app_settings
   )
 
