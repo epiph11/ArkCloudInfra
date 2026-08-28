@@ -46,10 +46,20 @@ param(
     [string]$ResourceGroup = "rg-arkcloud-dev",
     [string]$ApiAppName = "app-arkcloud-api-dev",
     [string]$WebAppName = "app-arkcloud-web-dev",
-    [string]$InventoryPath = "$PSScriptRoot/../.github/secrets-inventory.json"
+    [string]$InventoryPath = $null
 )
 
 $ErrorActionPreference = "Stop"
+
+# $PSScriptRoot evaluated inside the param() block's own default value is unreliable under
+# `powershell -File <relative path>` invocation (confirmed twice in practice, 2026-08-27:
+# resolves to an empty string, turning "$PSScriptRoot/../.github/..." into "/../.github/...",
+# which Get-Content then treats as an absolute path off the current drive root). Computing it
+# here instead, from $MyInvocation in the script's own body (not the param block), is the
+# reliable form regardless of how the script is invoked.
+if (-not $InventoryPath) {
+    $InventoryPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "../.github/secrets-inventory.json"
+}
 
 function Assert-Tool($name) {
     if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
