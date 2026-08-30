@@ -80,4 +80,22 @@ resource "azurerm_linux_web_app" "this" {
   }
 
   tags = var.tags
+
+  # Bug réel, confirmé deux fois en production (Sprint 6, 28-30/08/2026) :
+  # application_stack.docker_registry_password ne se propage pas de façon fiable au
+  # sous-système réel de pull de conteneur de l'App Service (hashicorp/terraform-provider-azurerm
+  # #22996, #23525). Le correctif qui marche vraiment est hors-Terraform, via
+  # `az webapp config container set` (voir scripts/rotate-ghcr-pat.ps1, étape 4). Un essai
+  # antérieur pour forcer les clés DOCKER_REGISTRY_SERVER_* dans app_settings a été rejeté par le
+  # provider lui-même à `terraform plan` ("cannot set a value for ... in app_settings" dès que
+  # application_stack est utilisé) — donc pas une option.
+  #
+  # Sans ce ignore_changes, CHAQUE apply qui touche cette ressource pour une raison quelconque
+  # (même sans rapport avec le registre) réapplique application_stack.docker_registry_password
+  # via le chemin buggé et écrase silencieusement le correctif hors-bande — provoquant une vraie
+  # panne de pull d'image. Constaté en direct : le commit 224d057 (qui ne touchait qu'un revert
+  # de app_settings, rien lié au registre) a suffi à recasser le pull sur app-arkcloud-api-dev.
+  lifecycle {
+    ignore_changes = [site_config[0].application_stack[0].docker_registry_password]
+  }
 }

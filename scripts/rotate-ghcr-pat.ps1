@@ -47,7 +47,13 @@ param(
     [string]$ApiAppName = "app-arkcloud-api-dev",
     [string]$WebAppName = "app-arkcloud-web-dev",
     [string]$ApiImage = "ghcr.io/epiph11/arkcloud-api:dev",
-    [string]$WebImage = "ghcr.io/epiph11/arkcloud-web:dev",
+    # Nom réel confirmé dans environments/dev/main.tf (module.app_service_web,
+    # container_image_name = "${var.image_org}/arkcloud-frontend") — PAS "arkcloud-web".
+    # Une valeur par défaut fausse ici a fait pointer `az webapp config container set` vers une
+    # image inexistante sur GHCR pendant l'incident du 30/08/2026 (ImagePullFailure: "Failed to
+    # fetch token, 401/403" au lieu du 200 attendu), après avoir déjà masqué pendant des jours un
+    # vrai bug de nom d'image resté invisible tant que l'ancien conteneur restait en vie.
+    [string]$WebImage = "ghcr.io/epiph11/arkcloud-frontend:dev",
     [string]$RegistryUser = "epiph11",
     [string]$InventoryPath = $null
 )
