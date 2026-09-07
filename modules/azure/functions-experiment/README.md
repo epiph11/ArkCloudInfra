@@ -1,9 +1,17 @@
-# Expérimentation Azure Functions (Sprint 6) — TEMPORAIRE
+# Expérimentation Azure Functions (Sprint 6) — retenu de facto en attendant Kudu
 
-Ce module n'est **pas** la solution retenue pour STRIDE flux 3 côté Azure. Il existe uniquement
-pour essayer Azure Functions une fois, concrètement — technologie jamais utilisée ailleurs dans
-ce projet. Une fois l'essai fait et vérifié, ce module est destiné à être détruit et remplacé par
-la rotation manuelle gratuite (Kudu SSH) — voir tâche de suivi côté roadmap.
+**Mise à jour du 07/09/2026** : ce module n'a jamais été démonté, contrairement à ce que ce
+README affirmait — vérifié dans `environments/dev/main.tf` et dans le state Terraform réel. Il
+tourne toujours en production, et `arkcloud_app` fonctionne réellement dessus (c'est ce qui a
+servi à la bascule côté Azure). **Ne pas suivre la section "Démonter" ci-dessous** tant que Kudu
+n'a pas été implémenté et vérifié en remplacement (voir ADR-0010, addendum) — la section reste
+documentée pour quand ce jour viendra, pas comme une action en attente.
+
+Ce module n'est **pas** la solution retenue à terme pour STRIDE flux 3 côté Azure — l'ADR-0010 a
+tranché pour une procédure manuelle via Kudu SSH, jugée plus simple à maintenir sur le long terme.
+Mais l'implémentation de Kudu est repoussée en backlog (elle demande d'ajouter un serveur SSH au
+Dockerfile de `ArkCloud.API`, jamais fait à ce jour), donc ce Function App reste le mécanisme réel
+utilisé pour toute rotation de `arkcloud_app` côté Azure d'ici là.
 
 Contexte complet : `main.tf` (en-tête) et `README.md` racine d'ArkCloudInfra, §10.
 
