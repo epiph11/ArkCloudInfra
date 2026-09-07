@@ -77,6 +77,12 @@ variable "deletion_protection" {
   default     = false
 }
 
+variable "apply_immediately" {
+  description = "false by default — RDS attribute changes (e.g. backup_retention_period) apply during the next maintenance window rather than immediately, avoiding unplanned downtime. Override true for a one-off change you want validated/applied right away (e.g. testing whether AWS accepts a given value at all, as opposed to Terraform reporting success while the real ModifyDBInstance outcome is still pending)."
+  type        = bool
+  default     = false
+}
+
 variable "performance_insights_enabled" {
   description = "db.t3.micro doesn't meaningfully support Performance Insights (too little memory to be useful) — left off for dev, revisit with a larger instance class in staging/prod."
   type        = bool

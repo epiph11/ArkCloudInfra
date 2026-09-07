@@ -68,6 +68,7 @@ resource "aws_db_instance" "this" {
   backup_retention_period = var.backup_retention_period
   backup_window           = "03:00-04:00"
   maintenance_window      = "sun:04:30-sun:05:30"
+  apply_immediately       = var.apply_immediately
 
   auto_minor_version_upgrade = true
   copy_tags_to_snapshot      = true

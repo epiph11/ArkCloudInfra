@@ -269,6 +269,14 @@ module "aws_rds" {
   db_subnet_group_name = module.aws_vpc.db_subnet_group_name
   security_group_id    = module.aws_security.database_security_group_id
 
+  # Finding du drill STRIDE flux 5 (Sprint 6) : le défaut du module (1 jour) était une contrainte
+  # Free Tier connue (7 rejeté avec FreeTierRestrictionError à la création) mais jamais retestée
+  # pour trouver le vrai plafond. Testé en direct le 07/09/2026 via ModifyDBInstance
+  # (apply_immediately temporaire) : 3 accepté, 6 accepté, 7 refusé — plafond exact confirmé à 6
+  # jours sur ce compte Free Tier. Fenêtre de PITR passe donc de <24h à 6 jours, sans changer de
+  # compte AWS ni de plan tarifaire.
+  backup_retention_period = 6
+
   tags = local.common_tags
 }
 
