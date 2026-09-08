@@ -13,6 +13,24 @@ variable "jwt_secret_arn" {
   type        = string
 }
 
+# --- Sprint 6, passwordless AWS (ADR-0011, scope AWS) ---
+
+variable "rds_resource_id" {
+  description = "module.aws_rds.resource_id (DbiResourceId) — used to scope the rds-db:connect policy on the task role to exactly this instance/user, same ARN shape RDS IAM auth requires."
+  type        = string
+}
+
+variable "rds_username" {
+  description = "The Postgres role the task role is allowed to connect as via IAM auth — arkcloud_app, not the admin/master user (ADR-0011 explicitly keeps the admin role on password auth)."
+  type        = string
+  default     = "arkcloud_app"
+}
+
+variable "aws_region" {
+  description = "For the rds-db:connect ARN (arn:aws:rds-db:<region>:<account>:dbuser:...) — no default, must match the region RDS was actually created in."
+  type        = string
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

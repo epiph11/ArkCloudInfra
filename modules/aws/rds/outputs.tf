@@ -34,3 +34,8 @@ output "arn" {
   description = "For scoping the rotation Lambda's IAM policy to exactly this instance."
   value       = aws_db_instance.this.arn
 }
+
+output "resource_id" {
+  description = "DbiResourceId — the identifier IAM DB auth policies need (arn:aws:rds-db:region:account:dbuser:{resource_id}/{db_user}), NOT the instance identifier or ARN used elsewhere in this module. Sprint 6, passwordless AWS (ADR-0011)."
+  value       = aws_db_instance.this.resource_id
+}

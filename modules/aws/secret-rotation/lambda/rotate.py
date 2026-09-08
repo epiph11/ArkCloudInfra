@@ -252,7 +252,16 @@ def _set_secret_app_role(arn, token):
                     "GRANT USAGE, SELECT ON SEQUENCES TO {}"
                 ).format(sql.Identifier(ADMIN_USERNAME), sql.Identifier(DB_USERNAME))
             )
-        logger.info("setSecret: role %s ready with DML-only grants.", DB_USERNAME)
+            # Sprint 6 — passwordless AWS (ADR-0011, scope AWS). rds_iam is the AWS-managed
+            # Postgres role that turns on IAM token auth for whoever it's granted to — coexists
+            # with the password this same function still manages above, exactly the "no brutal
+            # cutover" call made in the ADR. GRANT ROLE is idempotent in Postgres (re-granting an
+            # existing membership is a no-op, no error), same self-heal reasoning as every other
+            # GRANT in this block — safe to re-run on every rotation, not just the first one.
+            cur.execute(
+                sql.SQL("GRANT rds_iam TO {}").format(sql.Identifier(DB_USERNAME))
+            )
+        logger.info("setSecret: role %s ready with DML-only grants + rds_iam (IAM auth).", DB_USERNAME)
     finally:
         conn.close()
 

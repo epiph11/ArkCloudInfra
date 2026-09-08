@@ -326,6 +326,11 @@ module "aws_ecs" {
   arkcloud_app_secret_arn = module.aws_secrets.arkcloud_app_secret_arn
   jwt_secret_arn          = module.aws_secrets.jwt_secret_arn
 
+  # Sprint 6 — passwordless AWS (ADR-0011, scope AWS): scopes the task role's rds-db:connect
+  # policy to exactly arkcloud_app on this instance.
+  rds_resource_id = module.aws_rds.resource_id
+  aws_region      = var.aws_region
+
   tags = local.common_tags
 }
 
@@ -355,8 +360,18 @@ module "aws_ecs_service_api" {
   container_image     = module.aws_ecr.api_repository_url
   container_image_tag = var.api_image_tag
 
+  # Sprint 6 — passwordless AWS (ADR-0011, scope AWS): Database__AuthMode=AwsIam makes
+  # InfrastructureServiceRegistration.cs generate its own RDS IAM token (task role, see
+  # modules/aws/ecs's rds-iam-connect policy) instead of reading ConnectionStrings__DefaultConnection.
+  # module.aws_rds.address (host only, no port) + .port + .database_name, not .endpoint (which
+  # bundles host:port together and would need re-splitting for no benefit).
   environment = {
     ASPNETCORE_ENVIRONMENT = "Production"
+    Database__AuthMode     = "AwsIam"
+    Database__Host         = module.aws_rds.address
+    Database__Port         = tostring(module.aws_rds.port)
+    Database__Name         = module.aws_rds.database_name
+    Database__Username     = "arkcloud_app"
   }
 
   # Config key names confirmed against the real app this session (not just assumed): .NET's
@@ -368,6 +383,11 @@ module "aws_ecs_service_api" {
   # ArkCloud.API's own startup path runs migrations against its own connection (no
   # Database.Migrate() call in Program.cs, no CI step either) — schema changes are applied
   # out-of-band with the admin credential, so arkcloud_app never needs DDL.
+  #
+  # Kept granted even though Database__AuthMode=AwsIam means the app doesn't read it today: the
+  # coexistence design in ADR-0011 keeps password_auth_enabled true on purpose, and this is what
+  # lets a rollback to password auth be a one-line environment change (drop Database__AuthMode)
+  # rather than also re-wiring secrets access from scratch.
   secrets = {
     ConnectionStrings__DefaultConnection = module.aws_secrets.arkcloud_app_secret_arn
     Jwt__Key                             = module.aws_secrets.jwt_secret_arn

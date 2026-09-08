@@ -81,3 +81,25 @@ resource "aws_iam_role" "task" {
 
   tags = var.tags
 }
+
+# Sprint 6 — passwordless AWS (ADR-0011, scope AWS). This is the first real policy on the task
+# role since it was created empty in Sprint 5 — see the comment above. Lets ArkCloud.API generate
+# its own RDS IAM auth tokens (Amazon.RDS.Util.RDSAuthTokenGenerator, a local SigV4 signature, no
+# network call — see InfrastructureServiceRegistration.cs) instead of reading a static password.
+# Scoped to exactly one dbuser (arkcloud_app), not the whole instance — the admin/master user
+# deliberately stays on password auth (ADR-0011).
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_role_policy" "task_rds_connect" {
+  name = "rds-iam-connect"
+  role = aws_iam_role.task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "rds-db:connect"
+      Resource = "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.rds_resource_id}/${var.rds_username}"
+    }]
+  })
+}
