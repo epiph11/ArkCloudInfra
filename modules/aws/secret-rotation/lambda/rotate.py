@@ -261,6 +261,20 @@ def _set_secret_app_role(arn, token):
             cur.execute(
                 sql.SQL("GRANT rds_iam TO {}").format(sql.Identifier(DB_USERNAME))
             )
+            # Diagnostic ajouté en session (10/09/2026) : le login applicatif échoue en
+            # production avec "PAM authentication failed" malgré une policy IAM et un
+            # resource_id vérifiés corrects côté AWS. La doc de troubleshooting AWS officielle
+            # cite "le rôle rds_iam n'est en fait pas associé à l'utilisateur" comme cause n°1 de
+            # ce message — jamais vérifié depuis Postgres lui-même jusqu'ici, seulement déduit du
+            # fait que le GRANT ci-dessus n'a pas levé d'exception. Preuve directe, pas déduite.
+            cur.execute(
+                "SELECT ARRAY(SELECT b.rolname FROM pg_catalog.pg_auth_members m "
+                "JOIN pg_catalog.pg_roles b ON m.roleid = b.oid "
+                "WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = %s))",
+                (DB_USERNAME,),
+            )
+            memberof = cur.fetchone()[0]
+            logger.info("setSecret: %s is member of roles: %s", DB_USERNAME, memberof)
         logger.info("setSecret: role %s ready with DML-only grants + rds_iam (IAM auth).", DB_USERNAME)
     finally:
         conn.close()
