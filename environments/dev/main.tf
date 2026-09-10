@@ -365,6 +365,13 @@ module "aws_ecs_service_api" {
   # modules/aws/ecs's rds-iam-connect policy) instead of reading ConnectionStrings__DefaultConnection.
   # module.aws_rds.address (host only, no port) + .port + .database_name, not .endpoint (which
   # bundles host:port together and would need re-splitting for no benefit).
+  #
+  # Database__AwsRegion ajouté après un vrai échec en conditions réelles (10/09/2026) :
+  # RDSAuthTokenGenerator.GenerateAuthToken(host, port, user) sans région explicite s'appuie sur
+  # FallbackRegionFactory (env vars / IMDS), pas garanti de résoudre la bonne région dans une
+  # tâche ECS Fargate — un token signé pour la mauvaise région échoue avec le même message
+  # générique "PAM authentication failed" qu'une permission IAM insuffisante, ce qui a fait perdre
+  # du temps à diagnostiquer. Région explicite = pas d'ambiguïté.
   environment = {
     ASPNETCORE_ENVIRONMENT = "Production"
     Database__AuthMode     = "AwsIam"
@@ -372,6 +379,7 @@ module "aws_ecs_service_api" {
     Database__Port         = tostring(module.aws_rds.port)
     Database__Name         = module.aws_rds.database_name
     Database__Username     = "arkcloud_app"
+    Database__AwsRegion    = var.aws_region
   }
 
   # Config key names confirmed against the real app this session (not just assumed): .NET's
