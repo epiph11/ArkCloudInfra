@@ -109,3 +109,28 @@ jobs:
             --service arkcloud-arkcloud-dev-${{ github.event.client_payload.app }} \
             --force-new-deployment \
             --region eu-west-1
+
+      # Bug reel trouve en session (11/09/2026, tache #83 -- ajout de sshd pour Kudu) : cote Azure,
+      # RIEN ne force jamais un repull d'image sur tag flottant, contrairement a ECS ci-dessus.
+      # Consequence verifiee : apres deux deploiements "Success" completant sans erreur, la console
+      # Kudu de app-arkcloud-api-dev echouait toujours avec SSH CONN CLOSE immediat -- le conteneur
+      # tournait encore l'ancienne image (sans sshd), parce que le tag ":dev" n'avait pas change
+      # aux yeux de Terraform et `terraform apply` etait un no-op sur azurerm_linux_web_app.this.
+      # `az webapp restart` force App Service a re-pull l'image derriere le tag flottant au
+      # redemarrage -- meme role que force-new-deployment pour ECS juste au-dessus.
+      - name: Azure login (CLI restart, separe du provider Terraform azurerm)
+        if: >-
+          (github.event.client_payload.app == 'api' || github.event.client_payload.app == 'web')
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Force Azure App Service to pull the latest image
+        if: >-
+          (github.event.client_payload.app == 'api' || github.event.client_payload.app == 'web')
+        run: |
+          az webapp restart \
+            --name "app-arkcloud-${{ github.event.client_payload.app }}-${{ github.event.client_payload.environment }}" \
+            --resource-group "rg-arkcloud-${{ github.event.client_payload.environment }}"
