@@ -13,22 +13,26 @@
 
 -- Idempotent: safe to re-run (e.g. against a second environment) without erroring on an
 -- already-existing role.
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'arkcloud_app') THEN
-        CREATE ROLE arkcloud_app WITH
-            LOGIN
-            NOSUPERUSER
-            NOCREATEDB
-            NOCREATEROLE
-            NOREPLICATION
-            NOBYPASSRLS
-            PASSWORD :'app_password';
-    ELSE
-        ALTER ROLE arkcloud_app WITH PASSWORD :'app_password';
-    END IF;
-END
-$$;
+--
+-- Deliberately NOT a `DO $$ ... $$` block (found the hard way, via Kudu, 11/09/2026): psql's
+-- client-side `:'var'` substitution does not happen inside dollar-quoted text -- the DO body is
+-- lexically opaque to psql, so `:'app_password'` was sent to Postgres verbatim and rejected with
+-- a syntax error. `\gset` + `\if`/`\else` are psql meta-commands, not dollar-quoted SQL, so
+-- substitution works normally here.
+SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = 'arkcloud_app') AS role_exists \gset
+
+\if :role_exists
+ALTER ROLE arkcloud_app WITH PASSWORD :'app_password';
+\else
+CREATE ROLE arkcloud_app WITH
+    LOGIN
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE
+    NOREPLICATION
+    NOBYPASSRLS
+    PASSWORD :'app_password';
+\endif
 
 -- Explicit rather than relying on PUBLIC defaults (which vary by Postgres major version --
 -- PostgreSQL 15 changed the default public-schema grants for newly created databases).

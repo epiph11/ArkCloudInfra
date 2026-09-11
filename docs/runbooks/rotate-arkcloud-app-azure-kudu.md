@@ -79,9 +79,26 @@ une hypothèse validée du premier coup :
   réutilisé "chaud" sur le même worker) ; un `stop`/`start` complet a été nécessaire pour forcer
   le re-pull réel.
 
-**Reste à vérifier** : l'étape 3 (exécution réelle du script SQL, bootstrap ou rotation) et
-l'étape 4 (écriture du nouveau mot de passe dans Key Vault + restart applicatif) n'ont pas encore
-été exécutées de bout en bout — seule la disponibilité de `psql` dans la session est confirmée,
-pas une rotation réelle du rôle `arkcloud_app`. Mettre à jour ce document et l'ADR-0010 une fois
-une rotation complète effectuée avec succès et `.github/secrets-inventory.json` mis à jour en
-conséquence.
+**Rotation complète réussie le 11/09/2026** : script SQL exécuté via Kudu (`ALTER ROLE` + 4
+`GRANT` + 2 `ALTER DEFAULT PRIVILEGES`, sans erreur), `ConnectionStrings--DefaultConnection` mis à
+jour dans Key Vault, `app-arkcloud-api-dev` redémarré, `/health` vérifié (200 OK).
+`.github/secrets-inventory.json` mis à jour (`last_rotated: 2026-09-11`). L'ADR-0010 est
+pleinement close — Kudu est maintenant le mécanisme de facto, le Function App
+(`modules/azure/functions-experiment`) peut être démonté au prochain ménage.
+
+**Deux bugs de script SQL trouvés en route** (corrigés dans
+`scripts/sql/bootstrap-arkcloud-app-role.sql`) :
+- `psql` ne substitue pas `:'variable'` à l'intérieur d'un bloc `DO $$ ... $$` (le corps est
+  lexicalement opaque à psql) — remplacé par `\gset` + `\if`/`\else`/`\endif`, qui ne sont pas
+  dollar-quotés.
+- Une commande `-c` tapée/collée à la main dans le terminal web Kudu s'est révélée peu fiable
+  (risque de coquille manuelle, ex. `=` au lieu de `:`, ou paste multi-lignes cassé par le
+  terminal) — préférer systématiquement `-f /tmp/<script>.sql` avec le contenu collé une seule
+  fois via heredoc, plutôt que de retaper des commandes SQL à la main entre deux tentatives.
+
+**Leçon opérationnelle** (pas un bug de code, un vrai risque process) : plusieurs valeurs de mot
+de passe générées pendant cette première rotation ont fini exposées en clair dans la conversation
+avec l'assistant, par copier-coller répété — traitées comme grillées et regénérées à chaque fois,
+jusqu'à la validation finale par `/health`. Prochaine rotation : ne jamais faire transiter la
+valeur d'un secret par un canal de discussion, même accidentellement — se limiter à des
+confirmations "ok"/"erreur" entre chaque étape.
