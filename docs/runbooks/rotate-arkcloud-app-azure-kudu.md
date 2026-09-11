@@ -23,21 +23,30 @@ disponible — voir l'addendum du 07/09/2026 dans l'ADR-0010, qui corrige la pr�
    `https://app-arkcloud-api-dev.scm.azurewebsites.net/webssh/host`
    (authentification via le portail Azure / Azure AD, pas de credentials séparés à gérer).
 
-3. **Dans la session SSH**, exécuter le script de bootstrap/rotation (idempotent — crée le rôle
-   s'il n'existe pas encore, sinon change juste le mot de passe) :
+3. **Dans la session SSH**, recréer le fichier de script directement dans le conteneur (il ne vit
+   pas dans l'image `ArkCloud.API` — voir note ci-dessous — donc pas de chemin tout fait à
+   invoquer) puis l'exécuter. Coller le contenu à jour de
+   `ArkCloudInfra/scripts/sql/bootstrap-arkcloud-app-role.sql` via un heredoc :
    ```sh
+   cat > /tmp/bootstrap-arkcloud-app-role.sql <<'EOF'
+   -- (coller ici le contenu exact du fichier scripts/sql/bootstrap-arkcloud-app-role.sql)
+   EOF
+
    psql "host=<host-postgres-azure> port=5432 dbname=arkcloud user=arkcloudadmin sslmode=require" \
         -v app_password='<le-nouveau-mot-de-passe-genere-a-l-etape-1>' \
-        -f /app/scripts/sql/bootstrap-arkcloud-app-role.sql
+        -f /tmp/bootstrap-arkcloud-app-role.sql
    ```
    Le mot de passe admin (`arkcloudadmin`) est demandé interactivement par `psql` — le récupérer
    depuis Key Vault (`POSTGRES_ADMIN_PASSWORD (Azure)`), jamais en clair dans une commande ou un
    fichier.
 
-   Note : `scripts/sql/bootstrap-arkcloud-app-role.sql` vit dans `ArkCloudInfra`, pas dans l'image
-   `ArkCloud.API` — au premier essai réel, vérifier si le script doit être copié manuellement dans
-   le conteneur via la console Kudu (onglet Debug console) ou s'il vaut mieux l'ajouter au
-   Dockerfile. Documenter le résultat ici une fois vérifié en conditions réelles.
+   Note (tranché le 11/09/2026, vérifié en conditions réelles) : `/app` ne contient que le
+   binaire publié de `ArkCloud.API` (confirmé par `ls /app` dans une vraie session Kudu), pas de
+   dossier `scripts`. Délibérément **pas** embarqué dans l'image via le Dockerfile — ça créerait
+   une seconde copie du script à tenir synchronisée avec l'original dans `ArkCloudInfra`, le même
+   risque de duplication déjà évité côté AWS (voir le commentaire dans
+   `modules/aws/secret-rotation/lambda/rotate.py`, `_set_secret_app_role`). Le copier-coller
+   manuel à chaque rotation (tous les 90 jours) est un coût acceptable pour éviter ce risque.
 
 4. **Mettre à jour le secret applicatif** — le mot de passe généré à l'étape 1 doit être écrit là
    où `ArkCloud.API` le lit réellement (Key Vault, référence `arkcloud-app-role-password` ou
@@ -53,8 +62,26 @@ disponible — voir l'addendum du 07/09/2026 dans l'ADR-0010, qui corrige la pr�
 
 ## Statut
 
-**Non encore exécuté en conditions réelles** au moment de la rédaction de ce runbook (Sprint 6,
-11/09/2026). L'image avec `sshd` doit d'abord être déployée, puis ce runbook suivi une première
-fois pour valider chaque étape — en particulier l'étape 3 (chemin exact du script SQL dans le
-conteneur) est une hypothèse à confirmer, pas un fait vérifié. Mettre à jour ce document et
-l'ADR-0010 une fois la première rotation réelle effectuée avec succès.
+**Étapes 2-3 vérifiées en conditions réelles le 11/09/2026** : session Kudu ouverte sur
+`app-arkcloud-api-dev` (`SSH CONNECTION ESTABLISHED`, prompt `root@<container-id>:~#`), `psql
+--version` répond (16.5, Ubuntu 24.04). Deux bugs réels trouvés et corrigés au passage, pas juste
+une hypothèse validée du premier coup :
+- Le premier commit ajoutant `sshd` n'a déclenché **aucun run CI** (filtre `paths` du workflow
+  backend limité à `backend/**`, ne couvrait pas `deploy/docker/**`) — corrigé.
+- Trivy a bloqué le build suivant : les clés hôte SSH générées par le postinst `openssh-server`
+  au moment du `apt-get install` étaient gravées dans le layer de l'image (secret HIGH severity,
+  partagé entre toute instance dérivée) — corrigé en les régénérant au démarrage du conteneur
+  (`ssh-keygen -A` dans `start-api.sh`) plutôt qu'au build.
+- Après un déploiement "Success", l'App Service Azure tournait toujours l'ancienne image : rien
+  ne force jamais un re-pull sur un tag flottant inchangé côté Azure (contrairement à ECS, qui a
+  `force-new-deployment`) — corrigé en ajoutant un `az webapp restart` explicite à
+  `deploy-on-image.yml`. Un simple `restart` s'est révélé insuffisant en pratique (conteneur
+  réutilisé "chaud" sur le même worker) ; un `stop`/`start` complet a été nécessaire pour forcer
+  le re-pull réel.
+
+**Reste à vérifier** : l'étape 3 (exécution réelle du script SQL, bootstrap ou rotation) et
+l'étape 4 (écriture du nouveau mot de passe dans Key Vault + restart applicatif) n'ont pas encore
+été exécutées de bout en bout — seule la disponibilité de `psql` dans la session est confirmée,
+pas une rotation réelle du rôle `arkcloud_app`. Mettre à jour ce document et l'ADR-0010 une fois
+une rotation complète effectuée avec succès et `.github/secrets-inventory.json` mis à jour en
+conséquence.
