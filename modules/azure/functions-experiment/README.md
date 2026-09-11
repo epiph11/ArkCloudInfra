@@ -1,17 +1,18 @@
-# Expérimentation Azure Functions (Sprint 6) — retenu de facto en attendant Kudu
+# Expérimentation Azure Functions (Sprint 6) — démonté le 11/09/2026, remplacé par Kudu
 
-**Mise à jour du 07/09/2026** : ce module n'a jamais été démonté, contrairement à ce que ce
-README affirmait — vérifié dans `environments/dev/main.tf` et dans le state Terraform réel. Il
-tourne toujours en production, et `arkcloud_app` fonctionne réellement dessus (c'est ce qui a
-servi à la bascule côté Azure). **Ne pas suivre la section "Démonter" ci-dessous** tant que Kudu
-n'a pas été implémenté et vérifié en remplacement (voir ADR-0010, addendum) — la section reste
-documentée pour quand ce jour viendra, pas comme une action en attente.
+**Démonté le 11/09/2026** : Kudu (ADR-0010) a été implémenté, vérifié en conditions réelles (session
+SSH établie, `psql` fonctionnel) et une rotation complète d'`arkcloud_app` a été effectuée avec
+succès via cette voie — voir `ArkCloud/docs/adr/0010-bootstrap-arkcloud-app-azure-kudu.md` et
+`docs/runbooks/rotate-arkcloud-app-azure-kudu.md`. Ce module a donc rempli son rôle de mécanisme de
+facto et a été retiré d'`environments/dev/main.tf` (`terraform destroy -target=module.functions_experiment`
+puis suppression du bloc et de `functions_subnet_prefix`, voir §"Démonter" ci-dessous pour la
+procédure suivie). Le code source reste dans ce répertoire pour mémoire — il documente une option
+explorée et écartée par l'ADR-0010, pas juste du code mort à effacer sans trace.
 
-Ce module n'est **pas** la solution retenue à terme pour STRIDE flux 3 côté Azure — l'ADR-0010 a
+Ce module n'était **pas** la solution retenue à terme pour STRIDE flux 3 côté Azure — l'ADR-0010 a
 tranché pour une procédure manuelle via Kudu SSH, jugée plus simple à maintenir sur le long terme.
-Mais l'implémentation de Kudu est repoussée en backlog (elle demande d'ajouter un serveur SSH au
-Dockerfile de `ArkCloud.API`, jamais fait à ce jour), donc ce Function App reste le mécanisme réel
-utilisé pour toute rotation de `arkcloud_app` côté Azure d'ici là.
+Il a servi de mécanisme réel pour la rotation d'`arkcloud_app` côté Azure entre la bascule
+(tâche #84) et l'implémentation effective de Kudu (tâche #83, close le 11/09/2026).
 
 Contexte complet : `main.tf` (en-tête) et `README.md` racine d'ArkCloudInfra, §10.
 

@@ -20,13 +20,6 @@ module "network" {
   database_subnet_prefix         = "10.10.2.0/24"
   private_endpoint_subnet_prefix = "10.10.3.0/24"
 
-  # TEMPORARY (Sprint 6) — Azure Functions Flex Consumption experiment, see
-  # modules/azure/functions-experiment and README.md §10. .1-.4 above are already taken as
-  # /24 blocks; /27 is enough for a subnet that only ever hosts one Function App's VNet
-  # integration. Remove this line (and the module.functions_experiment block below) once the
-  # experiment concludes and Azure switches to the free Kudu-based rotation instead.
-  functions_subnet_prefix = "10.10.5.0/27"
-
   tags = local.common_tags
 }
 
@@ -623,46 +616,13 @@ module "azure_secret_rotation" {
   tags = local.common_tags
 }
 
-# TEMPORARY (Sprint 6) — Azure Functions experiment, see modules/azure/functions-experiment's
-# main.tf header for the full context (ADR-0010: not kept as the permanent rotation mechanism,
-# that becomes a manual Kudu procedure once written — task #83, backlog). Its infrastructure is
-# left running for now (no cost at rest), and it did one more real job beyond the experiment
-# itself: bootstrapping the actual STRIDE flux 3 cutover (task #69) by writing arkcloud_app's
-# connection string directly into the secret ArkCloud.API really reads
-# ("ConnectionStrings--DefaultConnection", app_role_secret_name below) — no separate one-off
-# script needed, since the function that already proved this worked was sitting right there.
-#
-# admin_connection_string_secret_name overridden to match the rename in module.azure_secret_rotation
-# above ("Postgres--AdminConnection") — without this override the function would read a secret
-# name the admin rotation no longer writes to.
-#
-# Before applying: build the deployment package first —
-#   bash modules/azure/functions-experiment/build.sh
-# (mirrors modules/aws/secret-rotation/lambda/build.sh's role, much simpler here — no local
-# pip install needed, Azure's remote build handles psycopg2's C extension server-side.)
-module "functions_experiment" {
-  source = "../../modules/azure/functions-experiment"
-
-  resource_group_name = module.resource_group.name
-  location            = var.location
-  name_prefix         = "arkcloud-${var.environment}"
-
-  subnet_id = module.network.functions_subnet_id
-
-  postgres_host           = module.postgresql.fqdn
-  postgres_database_name  = module.postgresql.database_name
-  postgres_admin_username = module.postgresql.administrator_login
-
-  key_vault_id  = module.key_vault.id
-  key_vault_uri = module.key_vault.vault_uri
-
-  admin_connection_string_secret_name = "Postgres--AdminConnection"
-  app_role_secret_name                = "ConnectionStrings--DefaultConnection"
-
-  application_insights_connection_string = module.monitoring.connection_string
-
-  tags = local.common_tags
-}
+# Azure Functions experiment (Sprint 6, ADR-0010) démonté le 11/09/2026 : Kudu (ADR-0010) prouvé
+# fonctionnel en conditions réelles le même jour, rotation arkcloud_app complète de bout en bout
+# effectuée avec succès via Kudu — le Function App n'est plus le mécanisme de facto, sa raison
+# d'être a disparu. Voir docs/runbooks/rotate-arkcloud-app-azure-kudu.md et
+# ArkCloud/docs/adr/0010-bootstrap-arkcloud-app-azure-kudu.md pour l'historique complet. Module
+# source conservé dans modules/azure/functions-experiment (pas supprimé du repo — documente une
+# option explorée et écartée, pas juste du code mort).
 
 module "flow_logs" {
   source = "../../modules/azure/flow-logs"
