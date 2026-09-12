@@ -38,6 +38,11 @@ env:
   TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
   TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
   TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
+  # Sprint 6 clôture (12/09) — passwordless Azure (ADR-0011). Requis, pas de défaut
+  # (modules/azure/postgresql/variables.tf) : sans ça, plan/apply échoue à l'évaluation avant
+  # même de contacter un provider. Repo variable à créer une fois : Settings > Secrets and
+  # variables > Actions > Variables > ENTRA_ADMIN_PRINCIPAL_NAME = ton UPN Azure.
+  TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
 
 jobs:
   validate:
@@ -514,6 +519,7 @@ jobs:
       TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
       TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
       TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
+      TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
       TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
       # Delta max toléré avant que la PR soit bloquée : 20 $/mois. Ordre de grandeur choisi contre
