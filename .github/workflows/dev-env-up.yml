@@ -27,6 +27,7 @@ env:
   TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
   TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
   TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
+  TF_VAR_entra_admin_object_id: ${{ vars.ENTRA_ADMIN_OBJECT_ID }}
 
 jobs:
   start:

@@ -43,6 +43,11 @@ env:
   # même de contacter un provider. Repo variable à créer une fois : Settings > Secrets and
   # variables > Actions > Variables > ENTRA_ADMIN_PRINCIPAL_NAME = ton UPN Azure.
   TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
+  # Object ID du même principal, explicite — pas déduit de data.azurerm_client_config.current
+  # (voir environments/dev/main.tf, bug réel du 12/09). Repo variable à créer une fois :
+  # `az ad user show --id <UPN> --query id -o tsv`, poser le résultat comme
+  # ENTRA_ADMIN_OBJECT_ID.
+  TF_VAR_entra_admin_object_id: ${{ vars.ENTRA_ADMIN_OBJECT_ID }}
 
 jobs:
   validate:
@@ -520,6 +525,7 @@ jobs:
       TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
       TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
       TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
+      TF_VAR_entra_admin_object_id: ${{ vars.ENTRA_ADMIN_OBJECT_ID }}
       TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
       # Delta max toléré avant que la PR soit bloquée : 20 $/mois. Ordre de grandeur choisi contre

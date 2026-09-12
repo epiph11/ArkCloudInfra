@@ -180,6 +180,11 @@ variable "entra_admin_principal_name" {
   type        = string
 }
 
+variable "entra_admin_object_id" {
+  description = "Object ID Entra ID EXACT du même principal que entra_admin_principal_name ci-dessus — volontairement une variable explicite, pas data.azurerm_client_config.current.object_id (qui varie selon qui exécute terraform : ton compte en local, le service principal CI en pipeline — bug réel trouvé le 12/09/2026, voir main.tf). Récupérer une fois : `az ad user show --id <ton-UPN> --query id -o tsv`."
+  type        = string
+}
+
 variable "entra_admin_principal_type" {
   description = "\"User\" si entra_admin_principal_name est un compte humain (cas attendu en dev — toi, via `terraform apply` local), \"ServicePrincipal\" si c'est le service principal OIDC de la CI."
   type        = string

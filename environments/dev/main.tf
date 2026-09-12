@@ -37,14 +37,17 @@ module "postgresql" {
   delegated_subnet_id = module.network.database_subnet_id
   virtual_network_id  = module.network.vnet_id
 
-  # Sprint 6 clôture — passwordless Azure (ADR-0011). L'identité qui applique ce Terraform
-  # (toi, via `terraform apply` en local ou le service principal OIDC en CI) devient
-  # administrateur Entra ID du serveur — voir le commentaire détaillé dans
-  # modules/azure/postgresql/main.tf. entra_admin_principal_name n'a pas de valeur déductible
-  # automatiquement (data.azurerm_client_config.current ne renvoie pas de nom lisible) :
-  # renseigner via TF_VAR_entra_admin_principal_name ou terraform.tfvars.
+  # Sprint 6 clôture — passwordless Azure (ADR-0011). Bug réel trouvé au premier apply réel en
+  # CI (12/09) : data.azurerm_client_config.current résout à QUI EXÉCUTE terraform, pas à une
+  # identité fixe — en CI c'est le service principal OIDC (github-arkcloudinfra, README §6),
+  # jamais l'utilisateur humain. entra_admin_principal_name (ton UPN, fourni via variable) et
+  # entra_admin_object_id (déduit de data.azurerm_client_config.current) désignaient donc DEUX
+  # identités différentes dès que ce apply tournait en CI — Azure a rejeté la création de
+  # l'administrateur AAD avec une erreur 500 générique plutôt qu'un message clair sur ce
+  # mismatch. Corrigé : object_id devient une variable explicite, résolue une fois pour toutes
+  # (indépendante de qui lance terraform), jamais recalculée dynamiquement.
   entra_admin_tenant_id      = data.azurerm_client_config.current.tenant_id
-  entra_admin_object_id      = data.azurerm_client_config.current.object_id
+  entra_admin_object_id      = var.entra_admin_object_id
   entra_admin_principal_name = var.entra_admin_principal_name
   entra_admin_principal_type = var.entra_admin_principal_type
 
