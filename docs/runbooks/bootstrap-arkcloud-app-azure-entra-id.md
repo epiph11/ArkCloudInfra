@@ -4,9 +4,11 @@ Voir ADR-0011 (`ArkCloud/docs/adr/0011-passwordless-auth-arkcloud-app-propositio
 contexte complet et le pendant déjà fait côté AWS (IAM DB auth). Ce document couvre uniquement les
 étapes opérationnelles côté Azure.
 
-**Statut au 12/09/2026** : Terraform appliqué (authentification Entra ID activée sur le serveur +
-administrateur AAD désigné), bootstrap SQL et bascule applicative **pas encore exécutés** — ce
-runbook, une fois suivi de bout en bout, complète l'activation réelle.
+**Statut au 12/09/2026** : Terraform appliqué (authentification Entra ID activée sur le serveur,
+administrateur AAD désigné), étapes 1-3 exécutées en conditions réelles avec succès (principal
+`app-arkcloud-api-dev` créé, `arkcloud_app` accordé) — voir bug réel rencontré et sa correction dans
+la section "Bugs réels rencontrés" plus bas. Étapes 4-6 (test isolé, bascule applicative réelle,
+vérification `/health`) **pas encore exécutées**.
 
 ## Pré-requis
 
@@ -17,6 +19,14 @@ runbook, une fois suivi de bout en bout, complète l'activation réelle.
   Entra ID du serveur (`az login`).
 - `arkcloud_app` déjà créé (`scripts/sql/bootstrap-arkcloud-app-role.sql` déjà exécuté au moins une
   fois — c'est déjà le cas, fait lors du cutover STRIDE flux 3, tâche #69).
+- `psql` accessible **depuis une machine à l'intérieur du VNet** (`vnet-arkcloud-dev`) — le serveur
+  n'a pas d'accès public, seul un endpoint privé existe. Azure Cloud Shell (réseau Microsoft) ne
+  fonctionne PAS pour ça : `could not translate host name ... Name or service not known`. Solution
+  qui marche : console SSH Kudu de `app-arkcloud-api-dev` (intégré à `snet-api`), avec `psql`
+  installé à la volée (`apt-get install -y postgresql-client`, conteneur éphémère) et un token AAD
+  récupéré séparément depuis Cloud Shell (`az account get-access-token --resource-type oss-rdbms
+  --query accessToken -o tsv`), collé manuellement en `PGPASSWORD` dans la session Kudu — pas de
+  `az` CLI installé dans ce conteneur.
 
 ## Étapes
 
@@ -64,9 +74,39 @@ runbook, une fois suivi de bout en bout, complète l'activation réelle.
    `password_auth_enabled = true` reste actif sur le serveur exprès pour ça (voir le commentaire
    dans `modules/azure/postgresql/main.tf`).
 
+## Bugs réels rencontrés (12/09/2026)
+
+1. **Cloud Shell ne peut pas joindre Postgres** — `psql: could not translate host name
+   "psql-arkcloud-dev.postgres.database.azure.com" to address: Name or service not known`. Le
+   serveur n'a qu'un endpoint privé lié à `vnet-arkcloud-dev` ; Cloud Shell tourne sur le réseau
+   Microsoft, pas dans ce VNet. Contourné via la console SSH Kudu de `app-arkcloud-api-dev`, qui
+   elle est bien sur `snet-api` (voir pré-requis ci-dessus).
+
+2. **`pgaadauth_create_principal(...) does not exist`** sur la base `arkcloud`, alors que la
+   connexion elle-même réussissait (auth + réseau OK) :
+   ```
+   ERROR:  function pgaadauth_create_principal(unknown, boolean, boolean) does not exist
+   ```
+   `\df *pgaadauth*` confirme 0 résultat sur `arkcloud`, mais la liste complète des fonctions
+   `pgaadauth_*` sur la base `postgres` (`\c postgres` puis `\df *pgaadauth*`). Contrairement à ce
+   que la documentation Microsoft laisse entendre, ces fonctions ne sont PAS exposées sur chaque
+   base — uniquement sur `postgres`. `scripts/sql/bootstrap-arkcloud-app-entra-id.sql` corrigé en
+   conséquence : `\c postgres` avant `pgaadauth_create_principal`, `\c arkcloud` avant le `GRANT`
+   (les rôles sont globaux au cluster, `pg_roles`/la création du principal fonctionnent depuis
+   n'importe quelle base ; seul `arkcloud_app`, créé dans `arkcloud`, exige d'y être reconnecté).
+
+Résultat concret obtenu (`postgres=>`) :
+```
+SELECT pgaadauth_create_principal('app-arkcloud-api-dev', false, false);
+       pgaadauth_create_principal
+-----------------------------------------
+ Created role for "app-arkcloud-api-dev"
+(1 row)
+```
+puis (`arkcloud=>`) : `GRANT arkcloud_app TO "app-arkcloud-api-dev";` → `GRANT ROLE`.
+
 ## Non fait à ce stade
 
-- Étapes 1-6 pas encore exécutées en conditions réelles (contrairement à AWS IAM DB auth,
-  vérifié bout en bout le 10-11/09/2026) — à faire et à documenter ici avec les mêmes détails
-  honnêtes que le runbook Kudu (bugs réels rencontrés, pas juste "ça a marché").
+- Étapes 4-6 (test isolé avant bascule, bascule réelle de `Database__AuthMode=AzureAd` sur
+  `app-arkcloud-api-dev`, vérification `/health` + logs) pas encore exécutées.
 - `staging`/`prod` n'ont pas encore de serveur Postgres Azure — ce runbook ne couvre que `dev`.

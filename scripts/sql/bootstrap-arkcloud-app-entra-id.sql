@@ -18,6 +18,19 @@
 --
 -- Idempotent : pgaadauth_create_principal échoue proprement (pas de duplication silencieuse) si
 -- le rôle existe déjà -- vérifié avant d'appeler, même logique \if que le script mot de passe.
+--
+-- Bug réel trouvé en exécution (12/09/2026) : pgaadauth_create_principal (et les autres fonctions
+-- pgaadauth_*) n'existent QUE dans pg_catalog de la base "postgres" -- pas exposées sur "arkcloud"
+-- ni aucune autre base utilisateur, contrairement à ce que la doc Microsoft laisse penser ("these
+-- functions are available on every database"). \df *pgaadauth* renvoie 0 lignes sur arkcloud, la
+-- liste complète sur postgres. D'où le \c explicite ci-dessous -- sans lui, ce script échoue avec
+-- "function pgaadauth_create_principal(...) does not exist" même une fois l'admin AAD Terraform
+-- appliqué et la connexion authentifiée avec succès (le problème n'est ni le réseau ni l'auth).
+--
+-- Les rôles Postgres sont globaux au cluster (pg_roles n'est pas scindé par base), donc la
+-- vérification d'existence et la création peuvent se faire depuis "postgres" sans souci -- seul
+-- le GRANT final doit se faire depuis "arkcloud", là où vit le rôle arkcloud_app.
+\c postgres
 
 SELECT EXISTS (
     SELECT FROM pg_roles WHERE rolname = :'app_service_identity_name'
@@ -34,6 +47,10 @@ SELECT EXISTS (
 SELECT pgaadauth_create_principal(:'app_service_identity_name', false, false);
 \endif
 
+-- Retour sur arkcloud pour le GRANT -- arkcloud_app n'existe que là (bootstrap-arkcloud-app-role.sql
+-- l'a créé dans cette base), même si le rôle app_service_identity_name lui-même est visible partout.
+\c arkcloud
+
 -- Héritage plutôt que duplication des GRANT -- voir bootstrap-arkcloud-app-role.sql pour le
 -- détail des droits réels accordés à arkcloud_app (SELECT/INSERT/UPDATE/DELETE, pas de DDL).
 --
@@ -42,6 +59,7 @@ SELECT pgaadauth_create_principal(:'app_service_identity_name', false, false);
 -- variable psql, pas littéral, et GRANT ne prend pas de paramètre lié côté serveur comme un
 -- SELECT -- :stmt substitue le texte généré par format() tel quel dans le flux SQL envoyé à
 -- psql, %I fait l'échappement d'identifiant côté serveur (protège même si le nom contenait des
--- caractères spéciaux).
+-- caractères spéciaux). Idempotent : GRANT ROLE ne fait rien si l'appartenance existe déjà, pas
+-- d'erreur en cas de ré-exécution.
 SELECT format('GRANT arkcloud_app TO %I', :'app_service_identity_name') AS stmt \gset
 :stmt;
