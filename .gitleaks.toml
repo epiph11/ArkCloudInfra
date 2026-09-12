@@ -1,0 +1,16 @@
+# Backlog #102 — étend la config par défaut de gitleaks. Allowlist volontairement vide pour
+# l'instant : contrairement à ArkCloud (voir son .gitleaks.toml), aucun faux positif connu ici au
+# 13/09/2026. Ajouter une entrée seulement après avoir confirmé qu'une détection n'est PAS un vrai
+# secret.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Faux positifs connus, confirmés non-sensibles"
+regexes = []
+paths = [
+  # Plan Terraform binaire — jamais commit (voir tâche #86, purgé de l'historique le 12/09/2026),
+  # exclu par cohérence si jamais quelqu'un force-ajoute le fichier par erreur.
+  '''environments/dev/tfplan''',
+]

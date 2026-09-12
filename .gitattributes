@@ -14,6 +14,12 @@
 *.json  text eol=lf
 *.md    text eol=lf
 
+# Backlog #102 (13/09/2026) — githooks/pre-commit (nouveau, ajouté pour gitleaks) n'a pas
+# d'extension, donc aucune règle ci-dessus ne le couvrait : Git le convertissait en CRLF sur
+# Windows (confirmé par le warning au premier `git add`), ce qui peut casser le shebang bash à
+# l'exécution — même risque que githooks/pre-push, qui avait la même lacune non détectée jusqu'ici.
+githooks/*  text eol=lf
+
 # Binaires : jamais de conversion.
 *.png   binary
 *.jpg   binary

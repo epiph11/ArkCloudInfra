@@ -1,0 +1,17 @@
+# Backlog #102 (zéro-coût, "pre-commit secret-scanning") — bloque un commit contenant un secret
+# AVANT qu'il n'atteigne git. Particulièrement utile ici : ce repo manipule des .tfvars, des
+# tokens AAD collés manuellement en session (voir docs/runbooks/), et un tfstate qui a déjà fuité
+# une fois (voir tâche #86/#87, purge d'historique + rotation complète le 12/09/2026) — gitleaks
+# ne remplace pas la vigilance sur .gitignore, mais ajoute un filet avant le commit lui-même.
+#
+# Installation (une fois, poste local) :
+#   pip install pre-commit --break-system-packages   (ou pipx install pre-commit)
+#   pre-commit install
+#
+# Faux positif ? Ajouter une entrée à .gitleaks.toml (allowlist), jamais `git commit --no-verify`
+# en réflexe.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks

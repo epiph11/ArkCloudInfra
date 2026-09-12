@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Hook git pre-commit — fait tourner gitleaks (via l'outil `pre-commit`, config dans
+# .pre-commit-config.yaml) avant chaque commit, pour bloquer un secret AVANT qu'il n'atteigne git.
+# Miroir de githooks/pre-push (Checkov) : même dossier core.hooksPath, même philosophie
+# (avertir plutôt que bloquer si l'outil est absent, la CI reste le filet de sécurité).
+#
+# Backlog #102 ("pre-commit secret-scanning"). Pas de `pre-commit install` classique ici — ce
+# repo utilise déjà core.hooksPath=githooks pour Checkov (voir pre-push), et `pre-commit install`
+# refuse de s'installer par-dessus un hooksPath custom ("Cowardly refusing..."). Ce fichier
+# appelle directement l'outil `pre-commit` à la place, sans toucher à la config hooksPath.
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+if command -v pre-commit >/dev/null 2>&1; then
+  PRECOMMIT="pre-commit"
+elif python -m pre_commit --version >/dev/null 2>&1; then
+  PRECOMMIT="python -m pre_commit"
+else
+  echo "⚠ pre-commit introuvable (ni sur le PATH, ni via 'python -m pre_commit') — scan de" >&2
+  echo "  secrets ignoré pour ce commit. Installer : pip install pre-commit" >&2
+  echo "  Push bloqué quand même par Checkov (pre-push) si le contenu est problématique, mais" >&2
+  echo "  un secret committé resterait dans l'historique local jusqu'à rotation." >&2
+  exit 0
+fi
+
+$PRECOMMIT run --hook-stage pre-commit
