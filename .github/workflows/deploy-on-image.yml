@@ -22,6 +22,14 @@ env:
   TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
   TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
   TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
+  # Bug réel trouvé le 13/09/2026 : oubliées ici lors de l'ajout du passwordless Azure Entra ID
+  # (Sprint 6 clôture, 12/09) — présentes dans dev-env-up.yml/dev-env-down.yml mais pas ce
+  # workflow. Terraform évalue TOUTES les variables déclarées au plan/apply, même sous -target
+  # (voir terraform apply ci-dessous), donc leur absence fait échouer n'importe quel déploiement
+  # d'image ici ("No value for required variable"), pas seulement un apply touchant réellement
+  # le serveur Postgres.
+  TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
+  TF_VAR_entra_admin_object_id: ${{ vars.ENTRA_ADMIN_OBJECT_ID }}
 
 jobs:
   deploy:
