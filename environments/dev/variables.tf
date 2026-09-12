@@ -175,6 +175,17 @@ variable "azure_enable_defender_app_service" {
   default     = false
 }
 
+variable "entra_admin_principal_name" {
+  description = "UPN (utilisateur) ou nom d'affichage (service principal) de l'identité qui devient administrateur Entra ID du serveur PostgreSQL — voir modules/azure/postgresql/main.tf. Pas de valeur par défaut : propre à chaque personne/compte, à définir via TF_VAR_entra_admin_principal_name ou terraform.tfvars, jamais committé."
+  type        = string
+}
+
+variable "entra_admin_principal_type" {
+  description = "\"User\" si entra_admin_principal_name est un compte humain (cas attendu en dev — toi, via `terraform apply` local), \"ServicePrincipal\" si c'est le service principal OIDC de la CI."
+  type        = string
+  default     = "User"
+}
+
 variable "azure_enable_defender_databases" {
   description = "Défaut false — même arbitrage budgétaire que azure_enable_defender_app_service, pour le plan Defender for Databases (PostgreSQL Flexible Server)."
   type        = bool

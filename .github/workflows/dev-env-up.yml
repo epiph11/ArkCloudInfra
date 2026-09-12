@@ -1,0 +1,77 @@
+name: Dev env — démarrage à la demande
+
+# Contrepartie de dev-env-down.yml — à lancer avant une session de dev/test. `terraform apply`
+# recrée le Plan App Service + les deux App Services (+ tout ce qui en dépendait et a été
+# cascadé-détruit : diagnostic settings, role assignment Key Vault) à partir de la config
+# existante, rien de nouveau à écrire. Postgres, lui, n'a jamais été détruit (juste arrêté) —
+# `az postgres flexible-server start` suffit, pas de terraform apply nécessaire pour ça
+# spécifiquement (le power state n'est pas un attribut suivi par la ressource Terraform).
+#
+# Ordre : Postgres démarre AVANT que les App Services ne redémarrent et n'essaient de s'y
+# connecter au premier health check.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
+  TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
+  TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+  TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
+  TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
+  TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
+
+jobs:
+  start:
+    name: Démarrer Postgres + recréer le Plan App Service
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: environments/dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (CLI, séparé du provider Terraform)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Démarrer PostgreSQL Flexible Server
+        run: |
+          az postgres flexible-server start \
+            --name psql-arkcloud-dev \
+            --resource-group rg-arkcloud-dev
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Build des packages Lambda (rotation + purge RGPD)
+        run: |
+          bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+          bash "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build.sh"
+
+      - name: terraform init
+        run: terraform init
+
+      # Pas de -target ici, volontairement : un apply complet rattrape aussi n'importe quel autre
+      # drift accumulé pendant que l'environnement était éteint (ex. rotation de secret manquée),
+      # pas seulement le Plan/les App Services.
+      - name: terraform apply
+        run: terraform apply -auto-approve -input=false

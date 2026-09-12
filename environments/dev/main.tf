@@ -37,6 +37,17 @@ module "postgresql" {
   delegated_subnet_id = module.network.database_subnet_id
   virtual_network_id  = module.network.vnet_id
 
+  # Sprint 6 clôture — passwordless Azure (ADR-0011). L'identité qui applique ce Terraform
+  # (toi, via `terraform apply` en local ou le service principal OIDC en CI) devient
+  # administrateur Entra ID du serveur — voir le commentaire détaillé dans
+  # modules/azure/postgresql/main.tf. entra_admin_principal_name n'a pas de valeur déductible
+  # automatiquement (data.azurerm_client_config.current ne renvoie pas de nom lisible) :
+  # renseigner via TF_VAR_entra_admin_principal_name ou terraform.tfvars.
+  entra_admin_tenant_id      = data.azurerm_client_config.current.tenant_id
+  entra_admin_object_id      = data.azurerm_client_config.current.object_id
+  entra_admin_principal_name = var.entra_admin_principal_name
+  entra_admin_principal_type = var.entra_admin_principal_type
+
   # geo_redundant_backup_enabled left at its false default — dev doesn't need it, staging/prod will override.
   tags = local.common_tags
 }
@@ -63,15 +74,27 @@ module "monitoring" {
   tags = local.common_tags
 }
 
+# Sprint 6 clôture (12/09) — App Service Plan partagé entre api et web, créé ici au lieu
+# d'un par module (voir modules/azure/app-service/main.tf pour le détail du compromis réseau).
+# ~12€/mois économisés : Azure facture le Plan à l'heure d'existence, un B1 pour 2 apps coûte
+# la même chose qu'un B1 pour 1 seule.
+resource "azurerm_service_plan" "arkcloud" {
+  name                = "asp-arkcloud-${var.environment}"
+  resource_group_name = module.resource_group.name
+  location            = var.location
+  os_type             = "Linux"
+  sku_name            = var.app_service_sku
+  tags                = local.common_tags
+}
+
 # --- ArkCloud.API ---
 module "app_service_api" {
   source = "../../modules/azure/app-service"
 
   resource_group_name = module.resource_group.name
   location            = var.location
-  plan_name           = "asp-arkcloud-api-${var.environment}"
+  service_plan_id     = azurerm_service_plan.arkcloud.id
   app_name            = "app-arkcloud-api-${var.environment}"
-  sku_name            = var.app_service_sku
 
   vnet_integration_subnet_id = module.network.api_subnet_id
 
@@ -84,6 +107,17 @@ module "app_service_api" {
 
   key_vault_uri                  = module.key_vault.vault_uri
   app_insights_connection_string = module.monitoring.connection_string
+
+  # RGPD automated retention purge (Sprint 6, ADR-0012) — enabled only here, never on
+  # app_service_web below. Azure has no equivalent of AWS's standalone purge Lambda (see
+  # modules/aws/gdpr-purge's header comment for why: an Automation Runbook has no network path to
+  # this private VNet), so the job runs in-process instead, inside the one App Service that
+  # already has that network path via vnet_integration_subnet_id above. See ArkCloud.API's
+  # Program.cs / CustomerRetentionPurgeHostedService for the application-side half of this.
+  extra_app_settings = {
+    "Gdpr__RunRetentionPurgeInProcess" = "true"
+    "Gdpr__CustomerRetentionYears"     = "3"
+  }
 
   tags = local.common_tags
 }
@@ -105,11 +139,15 @@ module "app_service_web" {
 
   resource_group_name = module.resource_group.name
   location            = var.location
-  plan_name           = "asp-arkcloud-web-${var.environment}"
+  service_plan_id     = azurerm_service_plan.arkcloud.id
   app_name            = "app-arkcloud-web-${var.environment}"
-  sku_name            = var.app_service_sku
 
-  vnet_integration_subnet_id = module.network.web_subnet_id
+  # Même subnet que app_service_api (snet-api), pas snet-web : un Plan = un seul subnet de VNet
+  # integration côté Azure, et les 2 apps partagent maintenant le même Plan (voir
+  # azurerm_service_plan.arkcloud ci-dessus). snet-web / nsg-web restent définis dans le module
+  # network pour ne pas complexifier ce Sprint 6, mais ne sont plus attachés à aucune ressource —
+  # à retirer proprement dans un futur nettoyage plutôt que dans la précipitation de clôture.
+  vnet_integration_subnet_id = module.network.api_subnet_id
 
   container_image_name = "${var.image_org}/arkcloud-frontend"
   container_image_tag  = var.web_image_tag
@@ -160,9 +198,12 @@ resource "azurerm_monitor_diagnostic_setting" "key_vault" {
     category_group = "allLogs"
   }
 
-  enabled_metric {
-    category = "AllMetrics"
-  }
+  # Sprint 6 clôture (12/09) — AllMetrics retiré des 4 diagnostic settings de ce fichier
+  # (Key Vault, Postgres, App Service api/web) : ça dupliquait dans Log Analytics (facturé à
+  # l'ingestion, PerGB2018) des métriques déjà conservées gratuitement 93 jours dans le magasin
+  # natif Azure Monitor Metrics — mêmes métriques, mêmes alertes possibles, sans payer deux fois
+  # pour les stocker à deux endroits. allLogs (logs d'audit/activité réels) reste inchangé, c'est
+  # lui qui apporte une information que les métriques n'ont pas.
 }
 
 resource "azurerm_monitor_diagnostic_setting" "postgresql" {
@@ -174,9 +215,7 @@ resource "azurerm_monitor_diagnostic_setting" "postgresql" {
     category_group = "allLogs"
   }
 
-  enabled_metric {
-    category = "AllMetrics"
-  }
+  # AllMetrics retiré (12/09) — voir le commentaire sur diag-kv-arkcloud-${var.environment} plus haut.
 }
 
 resource "azurerm_monitor_diagnostic_setting" "app_service_api" {
@@ -200,9 +239,7 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_api" {
     category_group = "allLogs"
   }
 
-  enabled_metric {
-    category = "AllMetrics"
-  }
+  # AllMetrics retiré (12/09) — voir le commentaire sur diag-kv-arkcloud-${var.environment} plus haut.
 
   # Dérive perpétuelle, tracée jusqu'à sa cause plutôt que subie : l'API Azure ne renvoie pas
   # log_analytics_destination_type pour Microsoft.Web/sites, donc Terraform le voit toujours
@@ -495,6 +532,14 @@ module "azure_cost_guard" {
   budget_start_date = var.azure_budget_start_date
   alert_email       = var.azure_alarm_email
 
+  # Sprint 6 clôture (12/09) — REVU le même jour : un planning fixe (nuit/weekend) supposait un
+  # rythme de travail régulier qui ne correspond pas à la réalité ("zéro utilisateur, dev
+  # sporadique — juste besoin que ce soit dispo quand je code/teste, pas plus"). Remplacé par un
+  # mécanisme à la demande : .github/workflows/dev-env-up.yml / dev-env-down.yml (workflow_dispatch,
+  # déclenchés manuellement). false ici désactive le planning calendaire ; la capacité reste dans
+  # le module (utile si le rythme redevient régulier plus tard), juste pas appliquée.
+  enable_scheduled_stop = false
+
   tags = local.common_tags
 }
 
@@ -583,6 +628,30 @@ module "aws_secret_rotation_app_role" {
   tags = local.common_tags
 }
 
+# RGPD automated retention purge — AWS side (Sprint 6, ADR-0012). Counterpart to the
+# CustomerRetentionPurgeHostedService running in-process on the Azure App Service — see
+# modules/aws/gdpr-purge/main.tf for why the mechanism differs between the two clouds.
+# Requires the Lambda package to be built first: modules/aws/gdpr-purge/lambda/build.sh.
+module "aws_gdpr_purge" {
+  source = "../../modules/aws/gdpr-purge"
+
+  name_prefix = "arkcloud-${var.environment}"
+
+  arkcloud_app_secret_arn = module.aws_secrets.arkcloud_app_secret_arn
+
+  db_host = module.aws_rds.address
+  db_port = module.aws_rds.port
+  db_name = module.aws_rds.database_name
+
+  vpc_subnet_ids    = module.aws_vpc.ecs_subnet_ids
+  security_group_id = module.aws_security.secret_rotation_security_group_id
+
+  # Reuses the existing alerts topic rather than creating a second notification path.
+  alarm_sns_topic_arn = module.aws_monitoring.sns_topic_arn
+
+  tags = local.common_tags
+}
+
 module "azure_secret_rotation" {
   source = "../../modules/azure/secret-rotation"
 
@@ -655,9 +724,7 @@ resource "azurerm_monitor_diagnostic_setting" "app_service_web" {
     category_group = "allLogs"
   }
 
-  enabled_metric {
-    category = "AllMetrics"
-  }
+  # AllMetrics retiré (12/09) — voir le commentaire sur diag-kv-arkcloud-${var.environment} plus haut.
 
   # Même dérive perpétuelle que app_service_api — voir le commentaire détaillé là-haut.
   lifecycle {

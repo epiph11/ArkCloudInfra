@@ -31,6 +31,16 @@ jobs:
     # d'image reste soumis à approbation, ce n'est pas parce que la source diffère (event vs
     # push) que le contrôle doit sauter.
     environment: production
+    # Bug réel trouvé le 12/09 (clôture Sprint 6) : le tag v0.2.0 a déclenché publish-image
+    # côté ArkCloud (api ET web) avec TF_ENVIRONMENT=prod, qui a dispatché ici environment=prod
+    # — mais environments/prod ne contient que .gitkeep (staging/prod arrivent Sprints 6-10,
+    # cf. commentaires plus bas dans ce fichier). Runs #34/#35 : "Error: No configuration
+    # files" après approbation manuelle de l'environment production (donc pas rattrapé avant).
+    # Seul environments/dev a une vraie config aujourd'hui — on le vérifie AVANT le checkout/
+    # working-directory pour échouer proprement (skip visible) plutôt que de laisser Terraform
+    # planter sur un dossier vide. Étendre cette condition (ou la retirer) au fur et à mesure
+    # que staging/prod sont réellement provisionnés.
+    if: github.event.client_payload.environment == 'dev'
     defaults:
       run:
         working-directory: environments/${{ github.event.client_payload.environment }}

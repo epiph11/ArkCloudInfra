@@ -96,6 +96,20 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Sprint 6 (ADR-0012) — same reason and same build script shape as the rotation package
+      # just above, for modules/aws/gdpr-purge's Lambda instead.
+      - name: Build du package Lambda de purge RGPD
+        run: |
+          bash "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build.sh"
+          {
+            echo '<details><summary>Manifeste du package Lambda (purge RGPD)</summary>'
+            echo
+            echo '```'
+            cat "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build/manifest.txt"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: terraform fmt -check
         run: terraform fmt -check -recursive
 
@@ -452,6 +466,18 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Build du package Lambda de purge RGPD
+        run: |
+          bash "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build.sh"
+          {
+            echo '<details><summary>Manifeste du package Lambda (purge RGPD)</summary>'
+            echo
+            echo '```'
+            cat "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build/manifest.txt"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: terraform init
         run: terraform init
 
@@ -527,6 +553,10 @@ jobs:
         if: env.INFRACOST_API_KEY != ''
         run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
 
+      - name: Build du package Lambda de purge RGPD (base)
+        if: env.INFRACOST_API_KEY != ''
+        run: bash "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build.sh"
+
       - name: Infracost — coût de base (branche cible de la PR)
         if: env.INFRACOST_API_KEY != ''
         run: |
@@ -541,6 +571,10 @@ jobs:
       - name: Build du package Lambda de rotation (PR)
         if: env.INFRACOST_API_KEY != ''
         run: bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+
+      - name: Build du package Lambda de purge RGPD (PR)
+        if: env.INFRACOST_API_KEY != ''
+        run: bash "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build.sh"
 
       - name: Infracost diff
         if: env.INFRACOST_API_KEY != ''

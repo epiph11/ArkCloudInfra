@@ -46,3 +46,23 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+# --- Arrêt/redémarrage programmé (Sprint 6 clôture, 12/09) ---
+
+variable "enable_scheduled_stop" {
+  description = "Arrête Postgres chaque nuit et le redémarre chaque matin ouvré (Europe/Paris), en plus du garde-fou budgétaire existant — pertinent pour un environnement dev/build sans utilisateur réel. false par défaut : à ne pas activer tel quel pour staging/prod."
+  type        = bool
+  default     = false
+}
+
+variable "scheduled_stop_time" {
+  description = "RFC3339 UTC — premier déclenchement de l'arrêt quotidien. Azure exige un moment dans le futur ; ajuster avant le premier apply si la date par défaut est déjà passée. Choisir une heure UTC qui correspond à ~20h Europe/Paris (attribut timezone gère la récurrence, pas ce premier déclenchement)."
+  type        = string
+  default     = "2026-09-13T18:00:00Z"
+}
+
+variable "scheduled_start_time" {
+  description = "RFC3339 UTC — premier déclenchement du redémarrage matinal (jours ouvrés). Même contrainte que scheduled_stop_time — viser ~7h Europe/Paris."
+  type        = string
+  default     = "2026-09-14T05:00:00Z"
+}

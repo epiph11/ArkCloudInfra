@@ -49,12 +49,18 @@ resource "azurerm_automation_account" "cost_guard" {
 resource "azurerm_role_definition" "postgres_stop" {
   name        = "arkcloud-${var.name_prefix}-postgres-stop"
   scope       = var.resource_group_id
-  description = "Lecture + arrêt d'un serveur PostgreSQL Flexible Server — rien d'autre, pas même le redémarrage."
+  description = "Lecture + arrêt/démarrage d'un serveur PostgreSQL Flexible Server — rien d'autre."
 
+  # Sprint 6 clôture (12/09) — "start/action" ajouté : le runbook budget-triggered ci-dessous
+  # reste volontairement stop-only (voir son commentaire), mais l'arrêt PROGRAMMÉ nuit/weekend
+  # plus bas (azurerm_automation_runbook.start_postgres) a besoin de redémarrer le serveur —
+  # sans ça, un dev arrêté une nuit resterait arrêté indéfiniment, personne d'autre que ce
+  # compte automatisé n'ayant de raison de le relancer un lundi matin à 7h.
   permissions {
     actions = [
       "Microsoft.DBforPostgreSQL/flexibleServers/read",
       "Microsoft.DBforPostgreSQL/flexibleServers/stop/action",
+      "Microsoft.DBforPostgreSQL/flexibleServers/start/action",
     ]
     not_actions = []
   }
@@ -111,6 +117,90 @@ resource "azurerm_automation_webhook" "stop_postgres" {
   lifecycle {
     ignore_changes = [expiry_time]
   }
+}
+
+# ---------------------------------------------------------------------------
+# Arrêt/redémarrage PROGRAMMÉ (Sprint 6 clôture, 12/09) — distinct du garde-fou budgétaire
+# au-dessus (déclenché à 100% de dépense réelle, avec le lag documenté de plusieurs heures
+# d'Azure Cost Management). Ici : Postgres coûte tant qu'il tourne, que le budget soit dépassé
+# ou non — cet environnement est un dev/build sans utilisateur réel, donc l'arrêter la nuit et
+# le weekend (quand personne ne teste) réduit le coût réel sans attendre qu'un seuil soit franchi.
+# var.enable_scheduled_stop=false par défaut : staging/prod (futurs sprints) ne voudront
+# probablement pas de ce comportement.
+# ---------------------------------------------------------------------------
+
+resource "azurerm_automation_runbook" "start_postgres" {
+  count = var.enable_scheduled_stop ? 1 : 0
+
+  name                    = "Start-ArkCloudPostgres"
+  location                = var.location
+  resource_group_name     = var.resource_group_name
+  automation_account_name = azurerm_automation_account.cost_guard.name
+  runbook_type            = "PowerShell"
+  log_progress            = true
+  log_verbose             = true
+
+  content = <<-EOT
+    param()
+    Connect-AzAccount -Identity | Out-Null
+    Write-Output "Démarrage programmé de PostgreSQL Flexible Server '${var.postgres_server_name}'."
+    Start-AzPostgresFlexibleServer -ResourceGroupName "${var.resource_group_name}" -Name "${var.postgres_server_name}"
+  EOT
+
+  tags = var.tags
+}
+
+# Le runbook Stop-ArkCloudPostgres existant (au-dessus) sert déjà à l'arrêt — réutilisé ici via
+# un déclencheur planifié en plus de son déclencheur budgétaire existant (azurerm_monitor_action_group
+# plus bas). Un seul runbook, deux déclencheurs (budget OU planning), pas de duplication.
+
+resource "azurerm_automation_schedule" "stop_nightly" {
+  count = var.enable_scheduled_stop ? 1 : 0
+
+  name                    = "schedule-${var.name_prefix}-postgres-stop-nightly"
+  resource_group_name     = var.resource_group_name
+  automation_account_name = azurerm_automation_account.cost_guard.name
+  frequency                = "Day"
+  interval                 = 1
+  # Premier déclenchement le lendemain à l'heure indiquée — Azure exige un start_time futur.
+  start_time                = var.scheduled_stop_time
+  timezone                  = "Europe/Paris"
+  description               = "Arrêt quotidien hors horaires de travail (dev/build, zéro utilisateur réel)."
+}
+
+resource "azurerm_automation_schedule" "start_weekday_morning" {
+  count = var.enable_scheduled_stop ? 1 : 0
+
+  name                    = "schedule-${var.name_prefix}-postgres-start-morning"
+  resource_group_name     = var.resource_group_name
+  automation_account_name = azurerm_automation_account.cost_guard.name
+  frequency                = "Week"
+  interval                 = 1
+  # Lundi-vendredi uniquement — pas de redémarrage automatique le weekend, cohérent avec
+  # "personne ne teste le weekend". Un redémarrage manuel (`az postgres flexible-server start`)
+  # reste possible si besoin ponctuel un samedi.
+  week_days                 = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  start_time                = var.scheduled_start_time
+  timezone                  = "Europe/Paris"
+  description               = "Redémarrage quotidien (jours ouvrés) avant les horaires de travail."
+}
+
+resource "azurerm_automation_job_schedule" "stop_nightly" {
+  count = var.enable_scheduled_stop ? 1 : 0
+
+  resource_group_name    = var.resource_group_name
+  automation_account_name = azurerm_automation_account.cost_guard.name
+  schedule_name            = azurerm_automation_schedule.stop_nightly[0].name
+  runbook_name              = azurerm_automation_runbook.stop_postgres.name
+}
+
+resource "azurerm_automation_job_schedule" "start_weekday_morning" {
+  count = var.enable_scheduled_stop ? 1 : 0
+
+  resource_group_name    = var.resource_group_name
+  automation_account_name = azurerm_automation_account.cost_guard.name
+  schedule_name            = azurerm_automation_schedule.start_weekday_morning[0].name
+  runbook_name              = azurerm_automation_runbook.start_postgres[0].name
 }
 
 resource "azurerm_monitor_action_group" "cost_guard" {

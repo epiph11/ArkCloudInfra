@@ -36,6 +36,19 @@ resource "azurerm_postgresql_flexible_server" "this" {
   geo_redundant_backup_enabled = var.geo_redundant_backup_enabled
   auto_grow_enabled            = var.storage_auto_grow_enabled
 
+  # Sprint 6 clôture (12/09) — passwordless Azure (ADR-0011, scope Azure), contrepartie exacte
+  # du "IAM Database Authentication" déjà fait côté AWS (module aws/rds). password_auth_enabled
+  # reste à true délibérément — coexistence, pas bascule forcée : arkcloudadmin (rotation
+  # Automation Runbook existante) continue de fonctionner sans y toucher, et un rollback vers
+  # ConnectionStrings:DefaultConnection reste un simple changement d'app setting, pas une
+  # opération sur le serveur. Même logique que le commentaire équivalent côté AWS ECS
+  # (Database__AuthMode) dans environments/dev/main.tf.
+  authentication {
+    active_directory_auth_enabled = true
+    password_auth_enabled         = true
+    tenant_id                     = var.entra_admin_tenant_id
+  }
+
   tags = var.tags
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
@@ -61,4 +74,26 @@ resource "azurerm_postgresql_flexible_server_database" "arkcloud" {
   server_id = azurerm_postgresql_flexible_server.this.id
   collation = "en_US.utf8"
   charset   = "utf8"
+}
+
+# Sprint 6 clôture (12/09) — passwordless Azure (ADR-0011). Administrateur Entra ID du serveur :
+# le seul principal habilité à exécuter pgaadauth_create_principal(...) pour enregistrer
+# d'autres identités Entra ID (ex. l'identité managée de app-arkcloud-api-${env}) comme rôles
+# Postgres. Volontairement l'identité qui applique ce Terraform (data.azurerm_client_config.current
+# côté environments/dev), pas l'identité managée de l'App Service elle-même — même raisonnement
+# de moindre privilège que le cost-guard plus haut : l'App Service n'a besoin que de se
+# connecter en tant qu'arkcloud_app une fois ce rôle créé, jamais du pouvoir d'admin qui sert à
+# le créer. Le bootstrap (création réelle du rôle arkcloud_app via pgaadauth_create_principal)
+# est un runbook manuel, voir docs/runbooks/bootstrap-arkcloud-app-azure-entra-id.md — même
+# raison que le bootstrap Kudu déjà utilisé pour la rotation de mot de passe : aucun chemin
+# réseau direct entre GitHub Actions et le serveur Postgres (accès privé VNet uniquement).
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "this" {
+  server_name         = azurerm_postgresql_flexible_server.this.name
+  resource_group_name = var.resource_group_name
+  tenant_id           = var.entra_admin_tenant_id
+  object_id           = var.entra_admin_object_id
+  principal_name      = var.entra_admin_principal_name
+  principal_type      = var.entra_admin_principal_type
+
+  depends_on = [azurerm_postgresql_flexible_server.this]
 }

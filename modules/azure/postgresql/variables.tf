@@ -73,3 +73,26 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+# --- Passwordless Azure (Sprint 6 clôture, ADR-0011) ---
+
+variable "entra_admin_tenant_id" {
+  description = "Tenant Entra ID sous lequel l'authentification AAD du serveur est activée — data.azurerm_client_config.current.tenant_id côté appelant."
+  type        = string
+}
+
+variable "entra_admin_object_id" {
+  description = "Object ID du principal Entra ID désigné administrateur du serveur (peut créer d'autres rôles AAD via pgaadauth_create_principal). Volontairement l'identité qui applique ce Terraform, pas l'identité managée de l'App Service — voir le commentaire sur azurerm_postgresql_flexible_server_active_directory_administrator.this dans main.tf."
+  type        = string
+}
+
+variable "entra_admin_principal_name" {
+  description = "Nom lisible du même principal (UPN pour un utilisateur, nom d'affichage pour un service principal) — affiché dans le portail Azure, pas utilisé pour l'authentification elle-même."
+  type        = string
+}
+
+variable "entra_admin_principal_type" {
+  description = "\"User\", \"ServicePrincipal\" ou \"Group\" — doit correspondre au type réel du principal ci-dessus."
+  type        = string
+  default     = "User"
+}

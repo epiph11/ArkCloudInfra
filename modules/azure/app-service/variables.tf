@@ -6,14 +6,9 @@ variable "location" {
   type = string
 }
 
-variable "plan_name" {
-  type = string
-}
-
-variable "sku_name" {
-  description = "e.g. B1 (dev), P1v3 (staging/prod)."
+variable "service_plan_id" {
+  description = "ID of an azurerm_service_plan created by the caller (environments/*/main.tf) — this module no longer creates its own Plan. Sprint 6 clôture: api + web share one Plan instead of one each (~12€/mois économisés). See main.tf's comment on azurerm_linux_web_app.this for the VNet-subnet tradeoff this implies."
   type        = string
-  default     = "B1"
 }
 
 variable "app_name" {

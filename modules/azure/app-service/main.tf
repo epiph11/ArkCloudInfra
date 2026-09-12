@@ -1,17 +1,23 @@
-resource "azurerm_service_plan" "this" {
-  name                = var.plan_name
-  resource_group_name = var.resource_group_name
-  location            = var.location
-  os_type             = "Linux"
-  sku_name            = var.sku_name
-  tags                = var.tags
-}
-
 resource "azurerm_linux_web_app" "this" {
   name                = var.app_name
   resource_group_name = var.resource_group_name
   location            = var.location
-  service_plan_id     = azurerm_service_plan.this.id
+  # Sprint 6 clôture (12/09) — réduction de coûts : ce module ne crée plus son propre Plan.
+  # Les 2 App Services (api + web) partagent désormais UN SEUL azurerm_service_plan (créé dans
+  # environments/dev/main.tf) au lieu d'un chacun — ~12€/mois économisés (2× B1 → 1× B1, Azure
+  # facture le Plan à l'heure d'existence, peu importe le nombre d'apps dessus).
+  #
+  # Compromis documenté (STRIDE flux 3, tâche #69) : Azure n'autorise qu'UN SEUL subnet de
+  # VNet integration par Plan — partager le Plan oblige donc web et api à partager le même
+  # subnet (snet-api), donc le même NSG. Le blocage réseau "DenyOutboundToDatabase" de nsg-web
+  # ne s'applique plus à Blazor. Mitigations restantes, toutes non-réseau : (1) Blazor n'appelle
+  # jamais Postgres dans le code — vérifié, aucun DbContext/connection string injecté côté
+  # ArkCloud.Blazor ; (2) même si un appel existait, PostgreSQL n'accepte que le rôle
+  # arkcloud_app, jamais présenté à Blazor ; (3) nsg-database continue de n'autoriser que
+  # source_address_prefix = snet-api, donc la surface réseau reste identique à avant, seule la
+  # distinction web/api À L'INTÉRIEUR de ce subnet disparaît. Voir docs/adr/ pour la mise à jour
+  # du threat model flux 3.
+  service_plan_id = var.service_plan_id
 
   https_only = true
 
