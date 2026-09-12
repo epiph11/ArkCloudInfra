@@ -99,7 +99,11 @@ module "app_service_api" {
   service_plan_id     = azurerm_service_plan.arkcloud.id
   app_name            = "app-arkcloud-api-${var.environment}"
 
-  vnet_integration_subnet_id = module.network.api_subnet_id
+  # Sprint 6 clôture — var.disconnect_vnet_for_plan_migration bascule à null le temps du swap de
+  # Plan (Azure interdit de changer service_plan_id tant que la VNet integration est active — voir
+  # le commentaire complet sur cette variable dans variables.tf). null est une valeur explicite
+  # acceptée par le provider (déconnecte la VNet integration), pas une absence de valeur.
+  vnet_integration_subnet_id = var.disconnect_vnet_for_plan_migration ? null : module.network.api_subnet_id
 
   container_image_name = "${var.image_org}/arkcloud-api"
   container_image_tag  = var.api_image_tag
@@ -150,7 +154,7 @@ module "app_service_web" {
   # azurerm_service_plan.arkcloud ci-dessus). snet-web / nsg-web restent définis dans le module
   # network pour ne pas complexifier ce Sprint 6, mais ne sont plus attachés à aucune ressource —
   # à retirer proprement dans un futur nettoyage plutôt que dans la précipitation de clôture.
-  vnet_integration_subnet_id = module.network.api_subnet_id
+  vnet_integration_subnet_id = var.disconnect_vnet_for_plan_migration ? null : module.network.api_subnet_id
 
   container_image_name = "${var.image_org}/arkcloud-frontend"
   container_image_tag  = var.web_image_tag

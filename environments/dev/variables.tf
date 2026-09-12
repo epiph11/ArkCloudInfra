@@ -196,3 +196,23 @@ variable "azure_enable_defender_databases" {
   type        = bool
   default     = false
 }
+
+# Sprint 6 clôture (12/09) — bascule temporaire, à retirer une fois le swap vers le Plan partagé
+# terminé (voir tâche #106). Azure refuse de changer service_plan_id sur un azurerm_linux_web_app
+# tant que la Regional VNet Integration est active ("Changing App Service Plans is not allowed
+# when Regional VNET integration is enabled. Please disconnect from the VNET and then try
+# again.") — trouvé en direct le 12/09/2026, aucune mention dans la doc du provider avant d'y
+# être confronté. Procédure en 3 applys distincts, chacun ciblé uniquement sur les 2
+# azurerm_linux_web_app :
+#   1. TF_VAR_disconnect_vnet_for_plan_migration=true  -> déconnecte le VNet (service_plan_id
+#      inchangé à ce stade)
+#   2. TF_VAR_disconnect_vnet_for_plan_migration=false -> reconnecte le VNet, MAIS c'est cet apply
+#      qui applique aussi le nouveau service_plan_id (déjà dans le state désiré depuis le premier
+#      apply raté) puisque le VNet est déconnecté au moment où Azure traite le changement de Plan
+#   Concrètement seuls 2 applys sont nécessaires, pas 3 — le changement de Plan et la
+#   reconnexion VNet passent ensemble une fois le blocage levé à l'étape 1.
+variable "disconnect_vnet_for_plan_migration" {
+  description = "true = déconnecte temporairement virtual_network_subnet_id sur les 2 App Services (voir commentaire ci-dessus). Remettre à false (ou supprimer la variable) une fois le swap de Plan terminé et vérifié."
+  type        = bool
+  default     = false
+}
