@@ -124,6 +124,20 @@ module "app_service_api" {
   extra_app_settings = {
     "Gdpr__RunRetentionPurgeInProcess" = "true"
     "Gdpr__CustomerRetentionYears"     = "3"
+
+    # Sprint 6 clôture (12/09) — passwordless Azure réel (ADR-0011, scope Azure). Bootstrap SQL
+    # exécuté (principal app-arkcloud-api-dev créé côté postgresql, arkcloud_app accordé — voir
+    # docs/runbooks/bootstrap-arkcloud-app-azure-entra-id.md pour le détail, y compris le bug réel
+    # pgaadauth_* introuvable sur la base arkcloud). InfrastructureServiceRegistration.cs
+    # (ArkCloud.Infrastructure) bascule sur BuildAzureAdDataSource dès que Database:AuthMode=AzureAd
+    # — DefaultAzureCredential utilise l'identité managée système de cette App Service, aucun
+    # credential stocké. password_auth_enabled reste true côté serveur (rollback = juste retirer
+    # cette clé, retour instantané sur ConnectionStrings:DefaultConnection).
+    "Database__AuthMode" = "AzureAd"
+    "Database__Host"     = module.postgresql.fqdn
+    "Database__Port"     = "5432"
+    "Database__Name"     = module.postgresql.database_name
+    "Database__Username" = "app-arkcloud-api-dev"
   }
 
   tags = local.common_tags

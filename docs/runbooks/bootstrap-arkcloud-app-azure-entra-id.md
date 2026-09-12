@@ -4,11 +4,13 @@ Voir ADR-0011 (`ArkCloud/docs/adr/0011-passwordless-auth-arkcloud-app-propositio
 contexte complet et le pendant déjà fait côté AWS (IAM DB auth). Ce document couvre uniquement les
 étapes opérationnelles côté Azure.
 
-**Statut au 12/09/2026** : Terraform appliqué (authentification Entra ID activée sur le serveur,
-administrateur AAD désigné), étapes 1-3 exécutées en conditions réelles avec succès (principal
-`app-arkcloud-api-dev` créé, `arkcloud_app` accordé) — voir bug réel rencontré et sa correction dans
-la section "Bugs réels rencontrés" plus bas. Étapes 4-6 (test isolé, bascule applicative réelle,
-vérification `/health`) **pas encore exécutées**.
+**Statut au 12/09/2026** : bascule complète, vérifiée de bout en bout en conditions réelles.
+`Database__AuthMode=AzureAd` actif sur `app-arkcloud-api-dev`, confirmé par un `POST /auth/login`
+réel renvoyant `401 Invalid email or password` (pas une 500) — preuve que l'app lit `users` via un
+token Entra ID de l'identité managée système, pas via `ConnectionStrings--DefaultConnection`.
+L'étape 4 (test isolé avant bascule) a été sautée délibérément : environnement dev sans utilisateur
+réel, downtime acceptable, le rollback (retirer `Database__AuthMode`) reste instantané si besoin.
+Voir "Bugs réels rencontrés" ci-dessous — 3 trouvés en route, aucun lié à Entra ID en tant que tel.
 
 ## Pré-requis
 
@@ -105,8 +107,36 @@ SELECT pgaadauth_create_principal('app-arkcloud-api-dev', false, false);
 ```
 puis (`arkcloud=>`) : `GRANT arkcloud_app TO "app-arkcloud-api-dev";` → `GRANT ROLE`.
 
+3. **`dotnet ef migrations script` refuse de builder** : `ArkCloud.API.csproj` référençait
+   `Azure.Identity` en `1.14.0` en dur, alors que `ArkCloud.Infrastructure.csproj` (passwordless
+   Azure, voir plus haut) exige `>= 1.14.2` — NU1605 "package downgrade" en Warning-As-Error,
+   restore bloqué. Fixé en alignant les deux projets sur `1.14.2`.
+
+4. **Base Azure `arkcloud` totalement vide — migrations EF jamais appliquées.** `SELECT * FROM
+   "__EFMigrationsHistory"` échouait avec "relation does not exist", `\dt` ne listait aucune table.
+   Contrairement à AWS RDS (vérifié bout en bout les 10-11/09), personne n'avait jamais lancé
+   `dotnet ef database update` contre cette instance Postgres Azure — un vrai trou antérieur à ce
+   travail, découvert seulement parce que c'est la première fois qu'un flux applicatif réel (login)
+   a tapé dans cette base. Résolu en générant le script SQL en local
+   (`dotnet ef migrations script --output migrations.sql`) puis en l'exécutant via `psql -f` dans
+   la console Kudu (même contrainte réseau privé que le bootstrap AAD — voir pré-requis).
+   Piège rencontré en route : le fichier généré par `dotnet ef migrations script` sur Windows
+   commence par un BOM UTF-8 (`ef bb bf`), qui a survécu à l'aller-retour PowerShell → base64 →
+   Kudu et cassait la toute première instruction SQL (`syntax error at or near CREATE`). Fix :
+   `tail -c +4 fichier.sql > fichier_clean.sql` avant de l'exécuter.
+
+5. **`42501: permission denied for table users`** une fois les tables créées : les tables venaient
+   d'être créées par l'admin AAD (`epiphanezare@outlook.com`), pas par `arkcloudadmin` — et
+   `ALTER DEFAULT PRIVILEGES FOR ROLE arkcloudadmin ...` (voir `bootstrap-arkcloud-app-role.sql`)
+   ne s'applique qu'aux objets créés PAR ce rôle précis, pas globalement. Fixé en ré-exécutant les
+   `GRANT ... ON ALL TABLES IN SCHEMA public TO arkcloud_app` explicites, comme pour les tables
+   historiques.
+
 ## Non fait à ce stade
 
-- Étapes 4-6 (test isolé avant bascule, bascule réelle de `Database__AuthMode=AzureAd` sur
-  `app-arkcloud-api-dev`, vérification `/health` + logs) pas encore exécutées.
 - `staging`/`prod` n'ont pas encore de serveur Postgres Azure — ce runbook ne couvre que `dev`.
+- Considérer un `ALTER DEFAULT PRIVILEGES FOR ROLE "epiphanezare@outlook.com" IN SCHEMA public
+  GRANT ...` (même schéma que pour `arkcloudadmin`) pour que les prochaines migrations lancées par
+  un admin AAD n'aient pas besoin d'un re-GRANT manuel après coup — pas fait ici, laissé en backlog
+  car peu fréquent (les migrations tournent normalement via CI/CD avec `arkcloudadmin`, pas un
+  admin AAD humain).
