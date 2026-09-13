@@ -14,9 +14,13 @@ module "network" {
   vnet_name           = "vnet-arkcloud-${var.environment}"
   address_space       = ["10.10.0.0/16"]
 
-  # See ArkCloudInfra/README.md §3 for why api/web are two separate subnets rather than one.
+  # Backlog #104 (13/09/2026) — snet-web / web_subnet_prefix retirés : depuis le partage d'un
+  # seul App Service Plan entre api et web (Sprint 6 clôture, voir commentaire sur
+  # azurerm_service_plan.arkcloud plus bas), Blazor utilise le même subnet que l'API
+  # (api_subnet_id) — un Plan = un seul subnet de VNet integration côté Azure. 10.10.4.0/24 reste
+  # libre si un vrai besoin de resegmentation revient plus tard. Voir README.md §3 pour l'ancien
+  # raisonnement (devenu obsolète) sur pourquoi api/web étaient deux subnets séparés.
   api_subnet_prefix              = "10.10.1.0/24"
-  web_subnet_prefix              = "10.10.4.0/24"
   database_subnet_prefix         = "10.10.2.0/24"
   private_endpoint_subnet_prefix = "10.10.3.0/24"
 
@@ -165,9 +169,9 @@ module "app_service_web" {
 
   # Même subnet que app_service_api (snet-api), pas snet-web : un Plan = un seul subnet de VNet
   # integration côté Azure, et les 2 apps partagent maintenant le même Plan (voir
-  # azurerm_service_plan.arkcloud ci-dessus). snet-web / nsg-web restent définis dans le module
-  # network pour ne pas complexifier ce Sprint 6, mais ne sont plus attachés à aucune ressource —
-  # à retirer proprement dans un futur nettoyage plutôt que dans la précipitation de clôture.
+  # azurerm_service_plan.arkcloud ci-dessus). snet-web / nsg-web retirés du module network
+  # (backlog #104, 13/09/2026) — ils n'étaient plus attachés à aucune ressource depuis ce partage
+  # de Plan.
   vnet_integration_subnet_id = var.disconnect_vnet_for_plan_migration ? null : module.network.api_subnet_id
 
   container_image_name = "${var.image_org}/arkcloud-frontend"

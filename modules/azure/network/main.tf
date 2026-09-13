@@ -24,26 +24,6 @@ resource "azurerm_subnet" "api" {
   }
 }
 
-# --- Web subnet: delegated to Microsoft.Web/serverFarms, used exclusively by
-# ArkCloud.Blazor's App Service Plan. Separate from snet-api because a VNet-integration
-# subnet belongs to exactly one App Service Plan — and kept out of the database NSG's
-# allow-list on purpose: Blazor Server talks to PostgreSQL only indirectly, through
-# ArkCloud.API's HTTP endpoints, never directly. ---
-resource "azurerm_subnet" "web" {
-  name                 = "snet-web"
-  resource_group_name  = var.resource_group_name
-  virtual_network_name = azurerm_virtual_network.this.name
-  address_prefixes     = [var.web_subnet_prefix]
-
-  delegation {
-    name = "app-service-delegation"
-    service_delegation {
-      name    = "Microsoft.Web/serverFarms"
-      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
-    }
-  }
-}
-
 # --- Database subnet: delegated to Microsoft.DBforPostgreSQL/flexibleServers so the
 # PostgreSQL Flexible Server can use private (VNet-integrated) access instead of a public
 # endpoint. ---
@@ -119,33 +99,6 @@ resource "azurerm_subnet_network_security_group_association" "api" {
   network_security_group_id = azurerm_network_security_group.api.id
 }
 
-# --- NSG: web subnet. Explicit deny on outbound 5432 — defense in depth so "Blazor never
-# talks to PostgreSQL directly" is a network fact, not just a convention the code happens to
-# follow today. ---
-resource "azurerm_network_security_group" "web" {
-  name                = "nsg-web"
-  resource_group_name = var.resource_group_name
-  location            = var.location
-  tags                = var.tags
-
-  security_rule {
-    name                       = "DenyOutboundToDatabase"
-    priority                   = 100
-    direction                  = "Outbound"
-    access                     = "Deny"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "5432"
-    source_address_prefix      = "*"
-    destination_address_prefix = var.database_subnet_prefix
-  }
-}
-
-resource "azurerm_subnet_network_security_group_association" "web" {
-  subnet_id                 = azurerm_subnet.web.id
-  network_security_group_id = azurerm_network_security_group.web.id
-}
-
 # --- NSG: database subnet — PostgreSQL (5432) only from the API subnet (and, temporarily, the
 # Functions experiment subnet below). Neither the web subnet nor anything else can reach it;
 # this is the real enforcement point for "backend and frontend are not the same trust tier" —
@@ -156,6 +109,15 @@ resource "azurerm_network_security_group" "database" {
   location            = var.location
   tags                = var.tags
 
+  # Backlog #104 (13/09/2026) — snet-web / nsg-web retirés (Sprint 6 clôture, §6.5 : Blazor
+  # partage désormais snet-api, voir environments/dev/main.tf). Conséquence à garder en tête :
+  # la défense en profondeur qu'apportait nsg-web ("DenyOutboundToDatabase", empêchant Blazor
+  # d'atteindre Postgres même en cas de bug applicatif) a disparu — Blazor tournant maintenant sur
+  # le même subnet que l'API, la règle ci-dessous l'autorise implicitement au niveau réseau. Ce
+  # qui empêche encore Blazor de parler directement à Postgres est uniquement une convention
+  # applicative (Blazor Server ne fait jamais d'appel DB direct, seulement via l'API HTTP), plus
+  # un fait réseau. Accepté comme compromis du partage de Plan (~12€/mois économisés) plutôt que
+  # traité comme un vrai finding, faute d'incident ou de scan l'ayant signalé à ce jour.
   security_rule {
     name                       = "AllowPostgresFromApi"
     priority                   = 100

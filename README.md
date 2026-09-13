@@ -171,23 +171,25 @@ Le plus simple : crée un `azurerm_resource_group`, ne fait rien d'autre. Instan
 
 ### `network`
 
-Un `azurerm_virtual_network` (`10.10.0.0/16`) découpé en **quatre** sous-réseaux :
+Un `azurerm_virtual_network` (`10.10.0.0/16`) découpé en **trois** sous-réseaux (historiquement quatre — voir note de retrait ci-dessous) :
 
 | Subnet | CIDR | Délégation | Rôle |
 |---|---|---|---|
-| `snet-api` | `10.10.1.0/24` | `Microsoft.Web/serverFarms` | Intégration VNet sortante pour le Plan d'`ArkCloud.API` — seul autorisé à atteindre la base |
-| `snet-web` | `10.10.4.0/24` | `Microsoft.Web/serverFarms` | Intégration VNet sortante pour le Plan d'`ArkCloud.Blazor` |
+| `snet-api` | `10.10.1.0/24` | `Microsoft.Web/serverFarms` | Intégration VNet sortante, partagée par les Plans d'`ArkCloud.API` **et** d'`ArkCloud.Blazor` (voir note ci-dessous) — seul subnet autorisé à atteindre la base |
 | `snet-db` | `10.10.2.0/24` | `Microsoft.DBforPostgreSQL/flexibleServers` | PostgreSQL Flexible Server, accès privé |
 | `snet-pe` | `10.10.3.0/24` | — | Réservé pour de futurs private endpoints (Key Vault, storage), vide jusqu'au durcissement Sprint 6 |
 
-**Correction faite en session** — la toute première version n'avait qu'un seul `snet-app` partagé par API et Blazor. Deux problèmes concrets, pas juste esthétiques :
+**Correction faite en session (Sprint 4)** — la toute première version n'avait qu'un seul `snet-app` partagé par API et Blazor. Deux problèmes concrets, pas juste esthétiques :
 
-1. **Techniquement invalide** : Azure lie un subnet d'intégration VNet à un **seul** App Service Plan. API et Blazor tournant sur deux Plans distincts, ils ne peuvent pas partager un subnet.
-2. **Frontière de confiance absente** : Blazor Server ne doit jamais parler à PostgreSQL directement, seulement via les endpoints HTTP d'`ArkCloud.API`. Un seul subnet pour les deux ne permettait pas d'exprimer cette règle au niveau réseau.
+1. **Techniquement invalide à l'époque** : Azure liait alors un subnet d'intégration VNet à un **seul** App Service Plan. API et Blazor tournant sur deux Plans distincts, ils ne pouvaient pas partager un subnet — d'où la création de `snet-web` (`10.10.4.0/24`) dédié à Blazor.
+2. **Frontière de confiance absente** : Blazor Server ne doit jamais parler à PostgreSQL directement, seulement via les endpoints HTTP d'`ArkCloud.API`. Un seul subnet pour les deux ne permettait pas d'exprimer cette règle au niveau réseau. `nsg-web` portait une règle `Deny` explicite en sortant vers `5432` pour la rendre vérifiable au niveau réseau.
+
+**Retrait `snet-web`/`nsg-web` (backlog #104, 13/09/2026)** — Sprint 6 a fait partager par Blazor et l'API le même App Service Plan (`azurerm_service_plan` unique, ~12€/mois économisés — Azure facture un Plan à l'heure d'existence, pas par app dessus). Les deux App Services tournent donc désormais sur le même Plan et peuvent partager `snet-api`, rendant `snet-web`/`nsg-web` orphelins : plus aucune ressource ne les référençait. Retirés du module `network` (plus de `web_subnet_prefix`, `web_subnet_id`, `web_nsg_id`). Le raisonnement du point 1 ci-dessus (deux Plans distincts) ne s'applique donc plus. `10.10.4.0/24` reste libre pour un futur usage.
+
+Conséquence à garder en tête (point 2 ci-dessus) : la défense en profondeur qu'apportait `nsg-web` a disparu — Blazor tournant maintenant sur `snet-api`, la règle `AllowPostgresFromApi` de `nsg-database` l'autorise implicitement au niveau réseau. Ce qui empêche encore Blazor de parler directement à Postgres n'est plus qu'une convention applicative (Blazor Server ne fait jamais d'appel DB direct, seulement via l'API HTTP). Accepté comme compromis du partage de Plan, pas traité comme un vrai finding faute d'incident ou de scan l'ayant signalé à ce jour (voir `docs/architecture-arkcloud.md` §6.6 et `docs/etat-des-lieux-sprint6-final.md`).
 
 NSGs :
 - `nsg-api` : aucune règle custom — l'intégration VNet est sortante uniquement, rien n'écoute d'entrant sur ce subnet. Laissé en place (vide) comme point d'ancrage pour un futur durcissement des sorties (Sprint 6).
-- `nsg-web` : `Deny` explicite en sortant sur le port `5432` vers `snet-db` — défense en profondeur, rend la règle "Blazor ne parle jamais à PostgreSQL" vérifiable au niveau réseau, pas juste une convention de code.
 - `nsg-database` : `Allow` entrant `5432` uniquement depuis `snet-api`. C'est ici, pas dans le découpage des subnets lui-même, que se trouve la vraie séparation de tiers.
 
 ### `postgresql`
@@ -206,7 +208,7 @@ Générique : accepte `scope` / `principal_id` / `role_definition_name` en varia
 
 Un `azurerm_service_plan` (Linux) + `azurerm_linux_web_app`, avec :
 - Identité **System Assigned** (aucun credential stocké nulle part).
-- Intégration VNet sortante via `vnet_integration_subnet_id` — instancié une fois avec `network.api_subnet_id` (pour `ArkCloud.API`) et une seconde fois avec `network.web_subnet_id` (pour `ArkCloud.Blazor`).
+- Intégration VNet sortante via `vnet_integration_subnet_id` — instancié une fois avec `network.api_subnet_id` (pour `ArkCloud.API`), et une seconde fois avec le **même** `network.api_subnet_id` (pour `ArkCloud.Blazor`) depuis le partage de Plan Sprint 6 (`network.web_subnet_id` retiré, backlog #104 — voir §3).
 - Registre d'image paramétré (`container_registry_url`/`username`/`password` séparés) pour permettre le remplacement GHCR → JFrog Artifactory (Sprint 4/5) sans toucher au module.
 - `app_settings` incluant `KeyVault__Uri` et `APPLICATIONINSIGHTS_CONNECTION_STRING`, alimentés par les outputs des modules `key-vault` et `monitoring`.
 
@@ -222,7 +224,7 @@ Log Analytics Workspace + Application Insights *workspace-based* (le seul mode s
 
 Deux vues, discutées et corrigées en session (voir §3 pour le détail des corrections) :
 
-**Vue structurelle** (imbrication) : `rg-arkcloud-dev` contient un unique VNet (`10.10.0.0/16`), lui-même découpé en 4 subnets (`snet-api`, `snet-web`, `snet-db`, `snet-pe`), chacun avec son NSG propre.
+**Vue structurelle** (imbrication) : `rg-arkcloud-dev` contient un unique VNet (`10.10.0.0/16`), lui-même découpé en 3 subnets (`snet-api`, `snet-db`, `snet-pe`), chacun avec son NSG propre — `snet-web`/`nsg-web` retirés en tant que ressources orphelines (backlog #104, 13/09/2026, voir §3).
 
 **Vue des flux de communication** :
 
