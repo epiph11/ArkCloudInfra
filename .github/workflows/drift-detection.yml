@@ -1,0 +1,105 @@
+name: Détection de drift Terraform
+
+# Backlog #102 (zéro-coût, "détection de drift") — lance un `terraform plan` régulier sur
+# environments/dev et fait échouer le job si le state divergerait de la réalité (quelqu'un a
+# changé une ressource depuis le portail Azure/AWS plutôt que via Terraform, un apply a échoué à
+# moitié, etc.). Ne modifie jamais rien — lecture seule (`plan`), jamais d'`apply` automatique ici.
+#
+# Caveat important, à garder en tête en lisant un run rouge : dev-env-down.yml (arrêt à la
+# demande, voir ce fichier) détruit réellement le Plan App Service + les 2 App Services via
+# `terraform destroy -target`. Tant que l'environnement est dans cet état "éteint", un plan complet
+# montre légitimement ces ressources comme "à créer" — c'est un état ATTENDU du cycle de vie
+# down/up, pas un vrai drift (quelqu'un touchant les ressources hors Terraform). Avant de
+# investiguer un run rouge, vérifier d'abord si l'environnement est actuellement éteint
+# (dev-env-up.yml pas relancé depuis) — si oui, ce n'est pas un incident.
+#
+# Ne committe/n'upload jamais le fichier de plan binaire en artefact : un tfstate/plan a déjà fuité
+# une fois dans ce repo (tâche #86/#87, purge d'historique + rotation complète le 12/09/2026) —
+# seul le rendu texte (`terraform show`) atterrit dans les logs du job, jamais le binaire.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Lundi 8h UTC — avant le début probable d'une session de travail, pour signaler un drift
+    # avant qu'il ne s'accumule. Pas plus fréquent : ce job ne coûte rien en soi (runner GitHub
+    # gratuit), mais un plan quotidien sur un repo à activité sporadique ajoute du bruit pour peu
+    # de valeur — un run manuel (workflow_dispatch) reste toujours possible entre deux.
+    - cron: "0 8 * * 1"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
+  TF_VAR_image_org: ${{ vars.IMAGE_ORG }}
+  TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+  TF_VAR_aws_postgres_admin_password: ${{ secrets.AWS_POSTGRES_ADMIN_PASSWORD }}
+  TF_VAR_ghcr_pat: ${{ secrets.GHCR_PAT }}
+  TF_VAR_entra_admin_principal_name: ${{ vars.ENTRA_ADMIN_PRINCIPAL_NAME }}
+  TF_VAR_entra_admin_object_id: ${{ vars.ENTRA_ADMIN_OBJECT_ID }}
+
+jobs:
+  drift-check:
+    name: terraform plan (lecture seule)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: environments/dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # Mêmes zips Lambda gitignorés que terraform-ci.yml/dev-env-up.yml — nécessaires même pour
+      # un plan en lecture seule : Terraform évalue filebase64sha256() sur toute la config avant
+      # de calculer quoi que ce soit.
+      - name: Build des packages Lambda (rotation + purge RGPD)
+        run: |
+          bash "$GITHUB_WORKSPACE/modules/aws/secret-rotation/lambda/build.sh"
+          bash "$GITHUB_WORKSPACE/modules/aws/gdpr-purge/lambda/build.sh"
+
+      - name: terraform init
+        run: terraform init
+
+      # -detailed-exitcode : 0 = aucun changement, 1 = erreur, 2 = changements détectés (drift).
+      # set +e le temps de capturer le code sans faire échouer le step lui-même prématurément —
+      # la décision (échec du job ou non) est prise explicitement juste après.
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -input=false -out=tfplan.drift
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Afficher le plan si drift détecté
+        if: steps.plan.outputs.exitcode == '2'
+        run: terraform show -no-color tfplan.drift
+
+      - name: Conclusion
+        run: |
+          case "${{ steps.plan.outputs.exitcode }}" in
+            0)
+              echo "✓ Aucun drift — le state correspond à la réalité."
+              ;;
+            2)
+              echo "::warning::Drift détecté sur environments/dev — voir le plan affiché ci-dessus. Si l'environnement est actuellement éteint (dev-env-down.yml), voir le caveat en tête de ce fichier avant d'investiguer."
+              exit 1
+              ;;
+            *)
+              echo "::error::terraform plan a échoué (code ${{ steps.plan.outputs.exitcode }}) — voir le step précédent."
+              exit 1
+              ;;
+          esac
