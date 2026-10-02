@@ -33,6 +33,7 @@
         "secretsmanager:PutSecretValue",
         "secretsmanager:UpdateSecret",
         "secretsmanager:RotateSecret",
+        "secretsmanager:CancelRotateSecret",
         "secretsmanager:TagResource",
         "secretsmanager:UntagResource",
         "secretsmanager:GetResourcePolicy",
