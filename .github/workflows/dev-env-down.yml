@@ -78,10 +78,13 @@ jobs:
       - name: terraform init
         run: terraform init
 
-      # Un seul destroy (Azure + AWS) pour ne rafraîchir le state qu'une fois.
+      # Un seul destroy (Azure + AWS). -refresh=false est indispensable : sinon Terraform relit
+      # TOUT le state, y compris la base Azure (azurerm_postgresql_flexible_server_database), et
+      # échoue avec ServerStoppedError dès que Postgres est déjà arrêté (relance du workflow,
+      # arrêt manuel préalable). Un destroy ciblé n'a pas besoin de ce refresh.
       - name: terraform destroy — Plan App Service (Azure) + NAT/ALB/ECS (AWS)
         run: |
-          terraform destroy -auto-approve -input=false \
+          terraform destroy -auto-approve -input=false -refresh=false \
             -target=azurerm_service_plan.arkcloud \
             -target=module.app_service_api.azurerm_linux_web_app.this \
             -target=module.app_service_web.azurerm_linux_web_app.this \
