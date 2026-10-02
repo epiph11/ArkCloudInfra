@@ -1,0 +1,50 @@
+name: Dev env — garde-fou "reste éteint"
+
+# RDS et PostgreSQL Flexible Server (Azure) REDÉMARRENT AUTOMATIQUEMENT après 7 jours d'arrêt et
+# recommencent à facturer le compute (~13 €/mois chacun) — c'est ce qui a fait « revenir » les
+# coûts après un dev-env-down. Ce job re-stoppe les bases tant que l'environnement est éteint.
+# "Éteint" = le Plan App Service Azure n'existe pas (détruit par dev-env-down.yml). Si
+# l'environnement est allumé (dev-env-up.yml), le job ne touche à rien. Lecture + stop seulement.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 */3 * *"   # tous les 3 jours, bien avant l'échéance de 7 jours
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  keep-stopped:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - name: Re-stopper les bases si l'environnement est éteint
+        run: |
+          PLANS=$(az appservice plan list --resource-group rg-arkcloud-dev --query 'length(@)' -o tsv)
+          if [ "$PLANS" != "0" ]; then
+            echo "Environnement allumé ($PLANS plan) — rien à faire."; exit 0
+          fi
+          AZ=$(az postgres flexible-server show --name psql-arkcloud-dev --resource-group rg-arkcloud-dev --query state -o tsv)
+          if [ "$AZ" = "Ready" ]; then
+            echo "Postgres Azure redémarré tout seul — arrêt."
+            az postgres flexible-server stop --name psql-arkcloud-dev --resource-group rg-arkcloud-dev
+          fi
+          RDS=$(aws rds describe-db-instances --db-instance-identifier psql-arkcloud-dev --query 'DBInstances[0].DBInstanceStatus' --output text)
+          if [ "$RDS" = "available" ]; then
+            echo "RDS redémarré tout seul — arrêt."
+            aws rds stop-db-instance --db-instance-identifier psql-arkcloud-dev
+          fi
+          echo "Azure=$AZ RDS=$RDS"

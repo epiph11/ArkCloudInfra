@@ -5,6 +5,15 @@ name: Dev env — arrêt à la demande
 # des horaires fixes, deux workflows manuels (celui-ci + dev-env-up.yml) à déclencher soi-même
 # juste avant/après une session de dev ou de test.
 #
+# CORRECTIF 03/10/2026 — la version initiale ne couvrait QUE Azure ; AWS tournait 24/7 (NAT Gateway,
+# ALB, Fargate, RDS ≈ 100 $/mois, facture réelle ~150 €). Ce workflow coupe maintenant AUSSI AWS :
+#   - NAT Gateway + EIP (~33 $/mois, jamais Free Tier), ALB (~18 $/mois + IPv4 publiques) et les
+#     2 services Fargate sont DÉTRUITS (terraform destroy -target, cascade vers les alarmes /
+#     la rotation de secret qui en dépendent — tout est recréé par dev-env-up.yml) ;
+#   - RDS est ARRÊTÉ (aws rds stop-db-instance) : plus de facturation du compute, stockage seul.
+# Piège connu : RDS ET PostgreSQL Flexible Server Azure REDÉMARRENT AUTOMATIQUEMENT après 7 jours
+# d'arrêt. dev-env-keep-stopped.yml (planifié) les re-stoppe tant que l'environnement est éteint.
+#
 # Ce que ça arrête réellement, et pourquoi c'est ce qui compte le plus côté coût :
 #   - Le Plan App Service partagé (asp-arkcloud-dev, ~12€/mois s'il tourne 24/7) — Azure facture
 #     un Plan à l'heure d'EXISTENCE, pas d'usage, donc `az webapp stop` seul ne changerait rien à
@@ -69,12 +78,18 @@ jobs:
       - name: terraform init
         run: terraform init
 
-      - name: terraform destroy — Plan App Service (api + web)
+      # Un seul destroy (Azure + AWS) pour ne rafraîchir le state qu'une fois.
+      - name: terraform destroy — Plan App Service (Azure) + NAT/ALB/ECS (AWS)
         run: |
           terraform destroy -auto-approve -input=false \
             -target=azurerm_service_plan.arkcloud \
             -target=module.app_service_api.azurerm_linux_web_app.this \
-            -target=module.app_service_web.azurerm_linux_web_app.this
+            -target=module.app_service_web.azurerm_linux_web_app.this \
+            -target=module.aws_ecs_service_api \
+            -target=module.aws_ecs_service_web \
+            -target=module.aws_alb \
+            -target=module.aws_vpc.aws_nat_gateway.this \
+            -target=module.aws_vpc.aws_eip.nat
 
       - name: Azure login (CLI, séparé du provider Terraform)
         uses: azure/login@v2
@@ -83,8 +98,33 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Arrêter PostgreSQL Flexible Server
+      - name: Arrêter PostgreSQL Flexible Server (Azure)
         run: |
-          az postgres flexible-server stop \
-            --name psql-arkcloud-dev \
-            --resource-group rg-arkcloud-dev
+          STATE=$(az postgres flexible-server show --name psql-arkcloud-dev \
+            --resource-group rg-arkcloud-dev --query state -o tsv)
+          echo "État Postgres Azure : $STATE"
+          if [ "$STATE" = "Ready" ]; then
+            az postgres flexible-server stop --name psql-arkcloud-dev --resource-group rg-arkcloud-dev
+          fi
+
+      - name: Arrêter RDS PostgreSQL (AWS)
+        run: |
+          STATE=$(aws rds describe-db-instances --db-instance-identifier psql-arkcloud-dev \
+            --query 'DBInstances[0].DBInstanceStatus' --output text)
+          echo "État RDS : $STATE"
+          if [ "$STATE" = "available" ]; then
+            aws rds stop-db-instance --db-instance-identifier psql-arkcloud-dev
+          fi
+
+      # Vérification : le job échoue (rouge) si une ressource facturée tourne encore.
+      - name: Vérifier qu'il ne reste aucune ressource facturée active
+        run: |
+          NAT=$(aws ec2 describe-nat-gateways --filter Name=state,Values=available,pending \
+            --query 'length(NatGateways)' --output text)
+          ALB=$(aws elbv2 describe-load-balancers --query 'length(LoadBalancers)' --output text)
+          TASKS=$(aws ecs list-tasks --cluster arkcloud-dev --query 'length(taskArns)' --output text 2>/dev/null || echo 0)
+          PLAN=$(az appservice plan list --resource-group rg-arkcloud-dev --query 'length(@)' -o tsv)
+          echo "NAT actifs=$NAT | ALB=$ALB | tâches ECS=$TASKS | Plans App Service=$PLAN"
+          if [ "$NAT" != "0" ] || [ "$ALB" != "0" ] || [ "$TASKS" != "0" ] || [ "$PLAN" != "0" ]; then
+            echo "::error::Des ressources facturées tournent encore"; exit 1
+          fi

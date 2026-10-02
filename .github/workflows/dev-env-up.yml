@@ -1,6 +1,6 @@
 name: Dev env — démarrage à la demande
 
-# Contrepartie de dev-env-down.yml — à lancer avant une session de dev/test. `terraform apply`
+# Contrepartie de dev-env-down.yml (Azure ET AWS : recrée aussi NAT/ALB/ECS et redémarre RDS) — à lancer avant une session de dev/test. `terraform apply`
 # recrée le Plan App Service + les deux App Services (+ tout ce qui en dépendait et a été
 # cascadé-détruit : diagnostic settings, role assignment Key Vault) à partir de la config
 # existante, rien de nouveau à écrire. Postgres, lui, n'a jamais été détruit (juste arrêté) —
@@ -47,17 +47,33 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Démarrer PostgreSQL Flexible Server
+      # Idempotent : la base peut déjà tourner (redémarrage auto Azure après 7 jours d'arrêt).
+      - name: Démarrer PostgreSQL Flexible Server (Azure)
         run: |
-          az postgres flexible-server start \
-            --name psql-arkcloud-dev \
-            --resource-group rg-arkcloud-dev
+          STATE=$(az postgres flexible-server show --name psql-arkcloud-dev \
+            --resource-group rg-arkcloud-dev --query state -o tsv)
+          echo "État Postgres Azure : $STATE"
+          if [ "$STATE" = "Stopped" ]; then
+            az postgres flexible-server start --name psql-arkcloud-dev --resource-group rg-arkcloud-dev
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: eu-west-1
+
+      # RDS doit être disponible AVANT que les tâches Fargate recréées par terraform apply
+      # n'essaient de s'y connecter.
+      - name: Démarrer RDS PostgreSQL (AWS)
+        run: |
+          STATE=$(aws rds describe-db-instances --db-instance-identifier psql-arkcloud-dev \
+            --query 'DBInstances[0].DBInstanceStatus' --output text)
+          echo "État RDS : $STATE"
+          if [ "$STATE" = "stopped" ]; then
+            aws rds start-db-instance --db-instance-identifier psql-arkcloud-dev
+          fi
+          aws rds wait db-instance-available --db-instance-identifier psql-arkcloud-dev
 
       - uses: hashicorp/setup-terraform@v3
         with:
